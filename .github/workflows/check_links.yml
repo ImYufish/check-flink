@@ -2,8 +2,11 @@ name: Check Links and Generate JSON
 
 on:
   schedule:
+    # 每天 2 次：状态检测（保留原有行为）
     - cron: '0 1 * * *'
     - cron: '0 13 * * *'
+    # 每 6 天 1 次：友链主页截图（新增，节省 CI 配额）
+    - cron: '30 1 1,7,13,19,25 * *'
   workflow_dispatch:
 
 env:
@@ -11,8 +14,8 @@ env:
 
 jobs:
   check_links:
+    name: 检测友链状态
     runs-on: ubuntu-latest
-
     steps:
     - name: Pull latest repository
       uses: actions/checkout@v4
@@ -34,7 +37,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-    
+
     - name: Download result.json artifact
       uses: dawidd6/action-download-artifact@v6
       with:
@@ -72,17 +75,92 @@ jobs:
         git add .
         git commit -m "⏱️GitHub Action每日定时更新"
         git push --force https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:page
-    
+
     - name: Delete Workflow Runs
       uses: Mattraks/delete-workflow-runs@v2
       with:
         retain_days: 30
         keep_minimum_runs: 6
 
+  take_screenshots:
+    name: 截取友链主页截图
+    runs-on: ubuntu-latest
+    steps:
+    - name: Pull latest repository
+      uses: actions/checkout@v4
+
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Setup Chrome
+      uses: browser-actions/setup-chrome@v2
+      with:
+        chrome-version: stable
+
+    - name: Install Chinese fonts
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y fonts-wqy-microhei fonts-wqy-zenhei
+
+    - name: Download result.json artifact (from check_links)
+      uses: dawidd6/action-download-artifact@v6
+      with:
+        github_token: ${{secrets.GITHUB_TOKEN}}
+        branch: main
+        name: 'result_json'
+        path: './'
+        if_no_artifact_found: warn
+
+    - name: Run screenshot
+      env:
+        IMG_UPLOAD_URL: ${{ secrets.IMG_UPLOAD_URL }}
+        IMG_AUTH_CODE: ${{ secrets.IMG_AUTH_CODE }}
+        CHROME_BIN: /usr/bin/google-chrome
+        SCREENSHOT_WORKERS: '2'
+      run: |
+        echo "IMG_UPLOAD_URL: $IMG_UPLOAD_URL"
+        python screenshot_runner.py
+
+    - name: Upload updated result.json as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: 'result_json_with_shot'
+        path: './result.json'
+        retention-days: 10
+
+    - name: Configure git
+      run: |
+        git config --global user.email "actions@github.com"
+        git config --global user.name "GitHub Actions"
+
+    - name: Commit and push (with siteshot)
+      run: |
+        cp ./result.json static/
+        cd static
+        git init
+        git add .
+        git commit -m "📸友链主页截图（每 6 天自动更新）"
+        git push --force https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:page
+
   keepalive-workflow:
     name: Keepalive Workflow
     if: ${{ always() }}
-    needs: check_links
+    needs: [check_links, take_screenshots]
     runs-on: ubuntu-latest
     permissions:
       actions: write

@@ -283,7 +283,8 @@ def main():
                     'latency': latency,
                     'fail_count': fail_count,
                     'has_author_link': has_author_link,  # 新增字段
-                    'linkpage': item.get('linkpage', '')  # 保留linkpage信息
+                    'linkpage': item.get('linkpage', ''),  # 保留linkpage信息
+                    'siteshot': prev_entry.get('siteshot', ''),  # 保留历史截图，由 screenshot_runner 更新
                 })
             except Exception as e:
                 logging.error(f"处理链接时发生错误: {item}, 错误: {e}")

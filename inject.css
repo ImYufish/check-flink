@@ -1,0 +1,31 @@
+/* inject.css - 截图时注入到目标页面，隐藏干扰元素 */
+/* 移植自 thun888/Python-WebSite-Screenshot */
+
+html, body {
+    overflow: hidden !important;
+    scrollbar-width: none !important;
+}
+
+body::-webkit-scrollbar,
+html::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+}
+
+/* 防止懒加载图片在截图为空白：触发所有 data-src 转为 src */
+img[data-src]:not([src]) {
+    content: url(attr(data-src));
+}
+
+img[loading="lazy"] {
+    loading: "eager";
+}
+
+/* 移除可能遮挡的固定定位元素 */
+[style*="position: fixed"][style*="z-index: 9999"],
+.cookie-banner,
+.ad-overlay,
+.notification-popup {
+    display: none !important;
+}
