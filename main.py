@@ -1,4 +1,5 @@
 import os
+import re
 import csv
 import json
 import time
@@ -92,61 +93,39 @@ def is_url(path):
     return urlparse(path).scheme in ("http", "https")
 
 def check_author_link_in_page(session, linkpage_url):
-    """检测友链页面是否包含作者链接"""
+    """检测友链页面是否包含指向作者的真实链接（<a href>）。
+
+    反链（反向链接）必须是可点击的超链接；仅在页面中以纯文本出现作者域名
+    （如脚本、JSON、评论区等）不计为反链，避免误报。
+    """
     if not AUTHOR_URL:
         return False
-    
+
     response, _ = request_url(session, linkpage_url, headers=RAW_HEADERS, desc="友链页面检测")
     if not response:
         return False
-    
-    # 处理作者URL，确保有协议号
-    author_url = AUTHOR_URL
-    if not author_url.startswith(('http://', 'https://')):
-        author_url = 'https://' + author_url
-    
-    # 生成各种可能的URL变体
-    author_variants = [
-        author_url,
-        author_url.replace('https://', 'http://'),
-        author_url.replace('https://', '//'),
-        author_url.replace('https://', ''),
-        AUTHOR_URL,  # 原始值（可能没有协议号）
-        '//' + AUTHOR_URL,
-        'https://' + AUTHOR_URL,
-        'http://' + AUTHOR_URL
-    ]
-    
-    # 去重
-    author_variants = list(set(author_variants))
-    
+
+    # 归一化作者域名：去协议、去首尾斜杠、转小写，并兼容 www 前缀
+    bare = re.sub(r'^https?://', '', AUTHOR_URL.strip()).strip('/').lower()
+    domain_variants = {bare, 'www.' + bare}
+    if bare.startswith('www.'):
+        domain_variants.add(bare[4:])
+
     content = response.text
-    found_in_href = False
-    found_as_text = False
-    
-    # 检查每种变体
-    for variant in author_variants:
-        # 检查是否在href属性中
-        if f'href="{variant}"' in content or \
-           f"href='{variant}'" in content or \
-           f'href="{variant}/"' in content or \
-           f"href='{variant}/'" in content:
-            found_in_href = True
-            break
-        
-        # 检查是否作为文本出现
-        if variant in content:
-            found_as_text = True
-    
-    if found_in_href:
-        logging.info(f"友链页面 {linkpage_url} 中找到作者链接: {author_url}")
-        return True
-    elif found_as_text:
-        logging.info(f"友链页面 {linkpage_url} 中包含作者URL文本但非链接")
-        return True
+
+    # 提取所有 href 属性值，逐个解析主机名判断是否指向作者域名
+    for href in re.findall(r'href\s*=\s*["\']([^"\']+)["\']', content, re.IGNORECASE):
+        host = re.sub(r'^https?:', '', href.strip()).lstrip('/').split('/')[0].lower()
+        if host in domain_variants:
+            logging.info(f"友链页面 {linkpage_url} 中找到作者链接: {href}")
+            return True
+
+    # 未找到真实链接；若域名仅作为文本出现，单独记录但不计为反链
+    if bare in content.lower():
+        logging.info(f"友链页面 {linkpage_url} 中仅出现作者URL文本，非真实链接，不计为反链")
     else:
         logging.info(f"友链页面 {linkpage_url} 中未找到作者链接")
-        return False
+    return False
 
 def fetch_origin_data(origin_path):
     logging.info(f"正在读取数据源: {origin_path}")
