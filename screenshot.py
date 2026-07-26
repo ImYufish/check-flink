@@ -47,6 +47,52 @@ def _build_thumio_url(url: str) -> str:
     return f"https://image.thum.io/get/width/{WINDOW_WIDTH}/crop/{WINDOW_HEIGHT}/png/{url}"
 
 
+def delete_from_imagebed(filename: str) -> bool:
+    """
+    上传前删除图床上的同名旧图，避免重复堆积
+    GET {base_url}/api/manage/delete/{folder}/{filename}
+    Authorization: Bearer {IMG_AUTH_CODE}
+    """
+    if not IMG_AUTH_CODE:
+        logger.info("[delete] 未配置 IMG_AUTH_CODE，跳过删除旧图")
+        return False
+
+    # 从 IMG_UPLOAD_URL 推导图床根地址（去掉末尾的 /upload）
+    base_url = IMG_UPLOAD_URL.rstrip("/")
+    if base_url.endswith("/upload"):
+        base_url = base_url[: -len("/upload")]
+
+    file_path = f"{IMG_UPLOAD_FOLDER}/{filename}" if IMG_UPLOAD_FOLDER else filename
+    delete_url = f"{base_url}/api/manage/delete/{file_path}"
+
+    try:
+        resp = requests.get(
+            delete_url,
+            headers={"Authorization": f"Bearer {IMG_AUTH_CODE}"},
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            logger.warning(
+                f"[delete] HTTP {resp.status_code}：{resp.text[:200]}"
+            )
+            return False
+        data = resp.json()
+        if data.get("success"):
+            logger.info(f"[delete] 已删除旧图：{file_path}")
+        else:
+            # 文件不存在等情况，不算错误，继续上传即可
+            logger.info(f"[delete] 删除跳过（可能不存在）：{data}")
+        return True
+    except json.JSONDecodeError:
+        logger.warning(
+            f"[delete] 响应非 JSON（状态码 {resp.status_code}）：{resp.text[:200]}"
+        )
+        return False
+    except Exception as e:
+        logger.warning(f"[delete] 删除旧图失败（不影响上传）：{e}")
+        return False
+
+
 def upload_to_imagebed(image_bytes: bytes, filename: str) -> Optional[str]:
     """
     调用 cfbed.sanyue.de 兼容 API 上传图片到图床
@@ -166,6 +212,7 @@ def take_screenshot(url: str, host: str) -> str:
     try:
         png_bytes = _take_screenshot_with_selenium(url, host)
         if png_bytes:
+            delete_from_imagebed(filename)  # 先删旧图（容错：失败不影响上传）
             uploaded = upload_to_imagebed(png_bytes, filename)
             if uploaded:
                 return uploaded

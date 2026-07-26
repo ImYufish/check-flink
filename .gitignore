@@ -1,5 +1,18 @@
 .env
 
+# 本地友链数据（不提交，保护隐私）
 link.csv
 
+# 运行产物（不提交，CI 重新生成）
 result.json
+
+# Python 编译缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# 诊断日志（不提交，临时文件）
+run_log.txt
+*.log

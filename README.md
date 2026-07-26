@@ -51,6 +51,7 @@
 | **🎯 灵活触发 + 增量处理** | 定时全自动 + 手动按需，可只处理单个友链，其余保留历史状态 |
 | **🔗 精准反链检测** | 仅识别真实 `<a href>` 超链接，纯文本提及不算反链 |
 | **🚀 GitHub Action 全自动** | 无服务器，零运维 |
+| **🧹 图床自动清理** | 上传前自动调用 cfbed 删除 API 清除同名旧图，避免资源堆积 |
 
 ---
 
@@ -699,19 +700,18 @@ Secret: myfriends   # 截图会存到 tu.xxx.com/myfriends/
 
 ### Q2: 截图全部走 thum.io 兜底，上传图床全部 401？
 
-**A**: 大概率是 `IMG_AUTH_CODE` 错误：
+**A**: 大概率是 `IMG_AUTH_CODE` 错误或认证方式不匹配：
 
-1. 登录 cfbed 控制台
-2. 找到 `AUTH_CODE`（不是 API key）
-3. 重新设置 Secret
-
-```bash
-# 本地测试上传
-curl -X POST "https://tu.xxx.com/upload?authCode=你的CODE&uploadFolder=youlian&uploadNameType=origin" \
-  -F "file=@test.png"
-```
-
-应返回 `200 OK` + JSON 数组。
+1. 登录 cfbed 控制台，确认 Token 拥有 **`upload`** 权限
+2. **新版 cfbed 已废弃 `authCode` query 参数，只认 `Authorization: Bearer` 头**（本项目已适配）
+3. 重新设置 Secret，值填完整的 token 字符串
+4. 本地快速测试：
+   ```bash
+   curl -X POST "https://tu.xxx.com/upload?uploadFolder=youlian&uploadNameType=origin" \
+     -H "Authorization: Bearer 你的TOKEN" \
+     -F "file=@test.png"
+   ```
+   应返回 `200 OK` + JSON 数组。
 
 ### Q3: 截图显示 "tuple index out of range" 错误？
 
@@ -763,6 +763,18 @@ webdriver-manager==4.0.2
 4. 运行
 
 **增量合并机制**：只有匹配的友链会被重新检测/截图，其余友链保留上次结果，`total_count` 不会减少。
+
+### Q8: 图床出现 `xxx.com(5).png` 这种带后缀的旧文件，怎么清理？
+
+**A**: 项目已自动调用 cfbed 删除 API 在每次上传前清理同名旧图：
+
+- **删除端点**：`GET {base_url}/api/manage/delete/{folder}/{filename}`
+- **认证**：`Authorization: Bearer {IMG_AUTH_CODE}`（与上传共用一个 Token）
+- **容错设计**：删除失败时仅记录警告，**不影响上传主流程**
+
+> ⚠️ **已知限制**：如果 cfbed 后端 R2 配置异常，删除接口会返回 `HTTP 400 {"success":false,"error":"Delete file failed"}`。此时图床会出现 `host.png`、`host(5).png`、`host(10).png` 等历史文件，但 `result.json` 中始终保存最新 URL，不影响前端展示。
+>
+> 解决方法：检查 cfbed 后台的 R2 CORS Policy（需允许 `DELETE`），或在 cfbed 后台「系统设置 → CloudFlare API Token」中配置 Global API Key 让 cfbed 自行清理缓存。
 
 ---
 
