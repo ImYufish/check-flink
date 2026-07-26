@@ -50,7 +50,8 @@ def _build_thumio_url(url: str) -> str:
 def upload_to_imagebed(image_bytes: bytes, filename: str) -> Optional[str]:
     """
     调用 cfbed.sanyue.de 兼容 API 上传图片到图床
-    POST {IMG_UPLOAD_URL}?authCode=xxx&uploadFolder=youlian&uploadNameType=origin
+    POST {IMG_UPLOAD_URL}?uploadFolder=youlian&uploadNameType=origin
+    Authorization: Bearer {IMG_AUTH_CODE}    （cfbed 新版只认 Bearer，不再支持 authCode query）
     返回 publicUrl
     """
     try:
@@ -58,8 +59,9 @@ def upload_to_imagebed(image_bytes: bytes, filename: str) -> Optional[str]:
             "uploadFolder": IMG_UPLOAD_FOLDER,
             "uploadNameType": "origin",
         }
+        headers = {}
         if IMG_AUTH_CODE:
-            params["authCode"] = IMG_AUTH_CODE
+            headers["Authorization"] = f"Bearer {IMG_AUTH_CODE}"
 
         files = {"file": (filename, io.BytesIO(image_bytes), "image/png")}
         logger.info(f"[upload] 正在上传 {filename} 到 {IMG_UPLOAD_URL} ...")
@@ -67,6 +69,7 @@ def upload_to_imagebed(image_bytes: bytes, filename: str) -> Optional[str]:
             IMG_UPLOAD_URL,
             params=params,
             files=files,
+            headers=headers,
             timeout=60,
         )
         if resp.status_code != 200:
