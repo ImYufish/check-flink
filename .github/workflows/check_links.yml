@@ -8,6 +8,16 @@ on:
     # 每 6 天 1 次：友链主页截图（新增，节省 CI 配额）
     - cron: '30 1 1,7,13,19,25 * *'
   workflow_dispatch:
+    inputs:
+      task:
+        description: '选择要执行的任务（仅手动触发时有效）'
+        required: false
+        type: choice
+        options:
+          - status_only        # 仅状态检测
+          - screenshots_only   # 仅截图（使用最近一次状态检测数据）
+          - both               # 状态检测 + 截图
+        default: status_only
 
 env:
   TZ: Asia/Shanghai
@@ -16,6 +26,8 @@ jobs:
   check_links:
     name: 检测友链状态
     runs-on: ubuntu-latest
+    # 除「手动选择仅截图」外，其余触发（每日定时 / 手动）都执行状态检测
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.task != 'screenshots_only' }}
     steps:
     - name: Pull latest repository
       uses: actions/checkout@v4
@@ -87,6 +99,8 @@ jobs:
   take_screenshots:
     name: 截取友链主页截图
     runs-on: ubuntu-latest
+    # 仅在【每 6 天定时】或【手动选择 screenshots_only / both】时执行
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '30 1 1,7,13,19,25 * *') || (github.event_name == 'workflow_dispatch' && (inputs.task == 'screenshots_only' || inputs.task == 'both')) }}
     steps:
     - name: Pull latest repository
       uses: actions/checkout@v4
