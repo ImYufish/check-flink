@@ -69,7 +69,10 @@ jobs:
         PROXY_URL: ${{ secrets.PROXY_URL }}
         SOURCE_URL: ${{ secrets.SOURCE_URL }}
         AUTHOR_URL: ${{ secrets.AUTHOR_URL }}
-        TARGET_LINK: ${{ inputs.target_link }}
+        # 关键：screenshots_only 模式下，check_links 跑全部友链（不应用 target_link 过滤），
+        # 避免把 result.json 过滤成只剩 target_link 那一条、丢失其他友链的状态和截图 URL。
+        # target_link 过滤只应在 take_screenshots job 中生效。
+        TARGET_LINK: ${{ inputs.task == 'screenshots_only' && '' || inputs.target_link }}
       run: |
         echo "SOURCE_URL: $SOURCE_URL"
         echo "AUTHOR_URL: $AUTHOR_URL"
