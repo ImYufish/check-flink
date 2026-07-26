@@ -31,8 +31,8 @@ jobs:
   check_links:
     name: 检测友链状态
     runs-on: ubuntu-latest
-    # 除「手动选择仅截图」外，其余触发（每日定时 / 手动）都执行状态检测
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.task != 'screenshots_only' }}
+    # 始终运行状态检测（保证 result.json 总是最新，截图任务有数据可读；screenshots_only 模式也跑一次轻量级检测）
+    if: ${{ true }}
     steps:
     - name: Pull latest repository
       uses: actions/checkout@v4
