@@ -106,6 +106,7 @@ jobs:
   take_screenshots:
     name: 截取友链主页截图
     runs-on: ubuntu-latest
+    needs: [check_links]
     # 仅在【每 6 天定时】或【手动选择 screenshots_only / both】时执行
     if: ${{ (github.event_name == 'schedule' && github.event.schedule == '30 1 1,7,13,19,25 * *') || (github.event_name == 'workflow_dispatch' && (inputs.task == 'screenshots_only' || inputs.task == 'both')) }}
     steps:
@@ -141,13 +142,11 @@ jobs:
         sudo apt-get install -y fonts-wqy-microhei fonts-wqy-zenhei
 
     - name: Download result.json artifact (from check_links)
-      uses: dawidd6/action-download-artifact@v6
+      uses: actions/download-artifact@v4
       with:
-        github_token: ${{secrets.GITHUB_TOKEN}}
-        branch: main
         name: 'result_json'
         path: './'
-        if_no_artifact_found: warn
+        if-no-result-found: warn
 
     - name: Run screenshot
       env:
