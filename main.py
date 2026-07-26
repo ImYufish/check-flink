@@ -197,9 +197,10 @@ def check_link(item, session):
         if response and response.status_code == 200:
             logging.info(f"[{method}] 成功访问: {link} ，延迟 {latency} 秒")
             
-            # 如果链接可达且有linkpage字段，检测友链页面
-            if 'linkpage' in item and item['linkpage'] and AUTHOR_URL:
-                has_author_link = check_author_link_in_page(session, item['linkpage'])
+            # 检测反链：优先检查友链页面，无 linkpage 时回退到首页
+            if AUTHOR_URL:
+                page_to_check = item.get('linkpage') or link
+                has_author_link = check_author_link_in_page(session, page_to_check)
             
             return item, latency, has_author_link
         elif response and response.status_code != 200:
@@ -227,9 +228,10 @@ def handle_api_requests(session):
                     logging.info(f"[API] 成功访问: {link} ，状态码 200")
                     item['latency'] = latency
                     
-                    # 如果API检测成功且有linkpage字段，检测友链页面
-                    if 'linkpage' in item and item['linkpage'] and AUTHOR_URL:
-                        has_author_link = check_author_link_in_page(session, item['linkpage'])
+                    # 检测反链：优先检查友链页面，无 linkpage 时回退到首页
+                    if AUTHOR_URL:
+                        page_to_check = item.get('linkpage') or link
+                        has_author_link = check_author_link_in_page(session, page_to_check)
                 else:
                     logging.warning(f"[API] 状态异常: {link} -> [{res_json.get('code')}, {res_json.get('data')}]")
                     item['latency'] = -1
