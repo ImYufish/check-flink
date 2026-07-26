@@ -31,6 +31,7 @@
   - [Step 7 · 部署到 Vercel](#step-7--部署到-vercel)
   - [Step 8 · 博客侧接入](#step-8--博客侧接入)
 - [📸 截图工作机制](#-截图工作机制)
+- [🎯 触发方式详解](#-触发方式详解)
 - [⚙️ 高级配置](#-高级配置)
 - [🐛 常见问题](#-常见问题)
 - [📜 二次开发](#-二次开发)
@@ -47,6 +48,8 @@
 | **🎯 智能兜底链** | Selenium 失败 → thum.io 在线截图 → 无白屏 |
 | **🔌 单一数据源** | 友链配置只在博客侧维护，截图仓库自动读取 |
 | **📊 result.json 统一输出** | 状态 + 截图 URL 合并到一个 JSON，前端一次拉取 |
+| **🎯 灵活触发 + 增量处理** | 定时全自动 + 手动按需，可只处理单个友链，其余保留历史状态 |
+| **🔗 精准反链检测** | 仅识别真实 `<a href>` 超链接，纯文本提及不算反链 |
 | **🚀 GitHub Action 全自动** | 无服务器，零运维 |
 
 ---
@@ -64,9 +67,11 @@
 
 ### 2. 本项目在原版基础上的修改
 
-#### 📝 `main.py`（**改 3 行**）
+#### 📝 `main.py`（**多处改动**）
 
-保留 `link_status` 中的历史 `siteshot` 字段，避免每次状态检测时把截图清空：
+- 保留 `link_status` 中的历史 `siteshot` 字段，避免每次状态检测时把截图清空
+- 新增 `TARGET_LINK` 环境变量支持：只检测指定友链，其余保留历史状态（增量合并）
+- 重写反链检测函数 `check_author_link_in_page`：用正则提取真实 `<a href>` 并精确比对主机名，纯文本出现不再误判为反链
 
 ```python
 'siteshot': prev_entry.get('siteshot', ''),  # 保留历史截图，由 screenshot_runner 更新
@@ -83,14 +88,16 @@
 | 失败回退 | 直接失败 | **Selenium 失败 → thum.io**；**上传失败 → thum.io** |
 | 触发方式 | 独立 cron | **从 `result.json` 读取已检测的友链**，只对 `latency > 0` 的友链截图 |
 
-#### ➕ `screenshot_runner.py`（**新增 92 行**）
+#### ➕ `screenshot_runner.py`（**新增 93 行**）
 
-独立入口，**解耦截图与状态检测**：
+独立入口，**解耦截图与状态检测**，支持 `TARGET_LINK` 过滤（只截指定友链）：
 
 ```text
 check_links job (每天 2 次) ─┐
                             ├→ result.json (含 status + 历史 siteshot)
 take_screenshots job (6 天) ┘
+
+TARGET_LINK="某友链" → 只检测/截图该友链，其余保留上次结果
 ```
 
 #### ➕ `inject.css`（**新增 31 行**）
@@ -111,19 +118,25 @@ requests==2.32.3
 + Pillow==11.3.0
 ```
 
-#### ✏️ `.github/workflows/check_links.yml`（**改 88 行**）
+#### ✏️ `.github/workflows/check_links.yml`（**大幅改造**）
 
-最关键的改动 —— **拆分为 2 个独立 Job**：
+最关键的改动 —— **2 个独立 Job + 条件触发 + 手动输入参数**：
 
-| Job | 触发频率 | 用途 |
+| Job | 触发条件 | 用途 |
 |-----|----------|------|
-| `check_links` | 每天 2 次（01:00, 13:00） | 状态检测，**轻量**（仅 requests） |
-| `take_screenshots` | 每 6 天 1 次（01:30 1/7/13/19/25 号） | 主页截图，**重型**（Selenium + Chrome） |
+| `check_links` | 每日定时 / 手动（除「仅截图」外） | 状态检测，**轻量**（仅 requests） |
+| `take_screenshots` | 6 天定时 / 手动选「截图」或「全部」 | 主页截图，**重型**（Selenium + Chrome） |
+
+**手动触发参数**（workflow_dispatch）：
+- `task`：选择执行内容（status_only / screenshots_only / both）
+- `target_link`：只处理指定友链（填名称或 URL 关键词，留空 = 全部）
 
 **为什么不合并成一个 job**？
 - Selenium + Chrome 安装耗时 ~2-3 分钟
 - 截图跑完 ~5-10 分钟
 - 分开后状态检测每次只需 ~1 分钟，结果更新更及时
+
+> 📌 两个 Job 现已支持**条件触发**与**手动按需运行**（含只处理单个友链），详见 [🎯 触发方式详解](#-触发方式详解)。
 
 #### ✏️ `.env.example`（**改 10 行**）
 
@@ -336,11 +349,16 @@ file=<binary PNG>
 
 1. 进入仓库 **Actions** 标签
 2. 左侧选择 **Check Links and Generate JSON**
-3. 右侧点击 **Run workflow** → **Run workflow**（绿色按钮）
-4. 等待约 1-3 分钟，第一个 Job `check_links` 跑完
-5. 等待约 5-10 分钟，第二个 Job `take_screenshots` 跑完
+3. 右侧点击 **Run workflow**
+4. 选择任务类型：
+   - `status_only`（默认）：仅状态检测
+   - `screenshots_only`：仅截图（使用最近一次检测数据）
+   - `both`：状态检测 + 截图
+5. `target_link` 留空（首次需全量跑）
+6. 点击 **Run workflow**（绿色按钮）
+7. 等待约 1-3 分钟（状态检测）/ 5-10 分钟（含截图）
 
-**如果只想要状态检测**：可以手动 `disable` `take_screenshots` job（在 workflow 文件里加 `if: false`）
+> 💡 首次部署建议选 `both`，后续日常用 `status_only` 即可
 
 ### Step 7 · 部署到 Vercel
 
@@ -491,6 +509,110 @@ Level 3：（本项目未实现，但可扩展）
 
 ---
 
+## 🎯 触发方式详解
+
+### 自动触发（定时）
+
+| cron 表达式 | 执行内容 | 说明 |
+|-------------|----------|------|
+| `0 1 * * *` | 仅状态检测 | 每天 01:00 |
+| `0 13 * * *` | 仅状态检测 | 每天 13:00 |
+| `30 1 1,7,13,19,25 * *` | 状态检测 + 截图 | 每 6 天（1/7/13/19/25 号 01:30） |
+
+> 截图 job 通过 `github.event.schedule` 判断是否为截图 cron，避免每天跑重型 Selenium
+
+### 手动触发（workflow_dispatch）
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `task` | choice | `status_only`（默认）/ `screenshots_only` / `both` |
+| `target_link` | string | 只处理指定友链（名称或 URL 关键词），留空 = 全部 |
+
+**组合示例**：
+
+| 场景 | task | target_link |
+|------|------|-------------|
+| 日常巡检 | `status_only` | 留空 |
+| 新增友链后只检测它 | `status_only` | `番茄` |
+| 新增友链后检测+截图 | `both` | `blog.example.com` |
+| 重新截全部友链 | `screenshots_only` | 留空 |
+| 全量检测+截图 | `both` | 留空 |
+
+### Job 触发条件
+
+```yaml
+check_links:
+  # 除「手动选仅截图」外，其余情况都执行状态检测
+  if: ${{ github.event_name != 'workflow_dispatch' || inputs.task != 'screenshots_only' }}
+
+take_screenshots:
+  # 只有「6天定时」或「手动选了截图/全部」才执行
+  if: ${{ (github.event_name == 'schedule' && github.event.schedule == '30 1 1,7,13,19,25 * *')
+       || (github.event_name == 'workflow_dispatch' && (inputs.task == 'screenshots_only' || inputs.task == 'both')) }}
+```
+
+### TARGET_LINK 增量处理
+
+当 `target_link` 非空时：
+
+1. **状态检测**（main.py）：只请求匹配的友链，其余从上次 `result.json` 保留，按数据源顺序合并
+2. **截图**（screenshot_runner.py）：只对匹配且可达的友链截图，其余保留已有截图 URL
+3. **total_count 不变**：不会因只跑一个友链就丢失其他友链数据
+
+> 💡 匹配规则：友链名称或 URL 包含 target_link 字符串（子串匹配）
+
+## 🎯 触发方式详解
+
+两个核心 Job（`check_links` 状态检测、`take_screenshots` 主页截图）**已解耦**，可按不同频率独立运行，也支持手动按需触发。
+
+### 一、自动触发（定时 schedule）
+
+| 时间 | 状态检测 | 主页截图 | 范围 |
+|------|:---:|:---:|------|
+| 每天 01:00 | ✅ | ❌ | 全部友链 |
+| 每天 13:00 | ✅ | ❌ | 全部友链 |
+| 每 6 天（1/7/13/19/25 号 01:30） | ✅ | ✅ | 全部友链 |
+
+### 二、手动触发（workflow_dispatch）
+
+在 **Actions → Run workflow** 面板有两个输入框：
+
+**`task`（决定跑什么）：**
+
+| 选项 | 状态检测 | 主页截图 |
+|------|:---:|:---:|
+| `status_only`（默认） | ✅ | ❌ |
+| `screenshots_only` | ❌ | ✅ |
+| `both` | ✅ | ✅ |
+
+**`target_link`（决定跑哪些）：**
+
+- 留空 → 处理全部友链
+- 填关键词（友链名称或 URL 子串）→ 只处理匹配的那一个，**其余友链保留历史状态**（增量更新，不丢数据）
+
+### 三、Job 触发条件（workflow 内部逻辑）
+
+```yaml
+check_links:
+  # 除「手动选择仅截图」外，其余触发（定时 / 手动）都执行
+  if: ${{ github.event_name != 'workflow_dispatch' || inputs.task != 'screenshots_only' }}
+
+take_screenshots:
+  # 仅在【每 6 天定时】或【手动选择 screenshots_only / both】时执行
+  if: ${{ (github.event_name == 'schedule' && github.event.schedule == '30 1 1,7,13,19,25 * *') || (github.event_name == 'workflow_dispatch' && (inputs.task == 'screenshots_only' || inputs.task == 'both')) }}
+```
+
+### 四、增量处理（TARGET_LINK）
+
+`main.py` 和 `screenshot_runner.py` 都读取 `TARGET_LINK` 环境变量：
+
+- **main.py**：只检测匹配的友链；未检测的友链从上一次 `result.json` 保留历史状态，按数据源顺序合并回结果，`total_count` 不减少。
+- **screenshot_runner.py**：只截图匹配的可达友链，其余友链的 `siteshot` 字段保持不变。
+
+> 💡 典型场景：新增/修改某个友链后，手动触发 `task=both` + `target_link=友链名`，几十秒即可完成单个友链的检测 + 截图，无需全量跑。
+
+---
+
 ## ⚙️ 高级配置
 
 ### 1. 调整截图频率
@@ -561,6 +683,8 @@ Secret: myfriends   # 截图会存到 tu.xxx.com/myfriends/
 
 并在 Secrets 中设置 `AUTHOR_URL=fqzlr.com`（你的博客域名）。
 
+> 🔍 检测逻辑：抓取友链页面（`linkpage`，留空回退首页），用正则提取所有真实 `<a href>` 链接并精确比对主机名（兼容 `www`、协议相对、带路径、大小写）；**仅纯文本出现域名不计为反链**，避免误报。
+
 ---
 
 ## 🐛 常见问题
@@ -629,17 +753,16 @@ webdriver-manager==4.0.2
 - 增加等待时间：`PAGE_LOAD_WAIT = 5`
 - 在 `screenshot.py` 中检测页面 title 跳过异常页面
 
-### Q7: 怎么只截图部分友链？
+### Q7: 怎么只检测/截图某个友链？
 
-**A**: 编辑 `screenshot_runner.py`：
+**A**: 无需改代码！手动触发时填写 `target_link` 参数即可：
 
-```python
-# 默认：只对可达友链截图
-targets = [it for it in link_status if it.get("latency", -1) > 0]
+1. Actions → Run workflow
+2. `task` 选择 `both`（或按需选 status_only / screenshots_only）
+3. `target_link` 填写友链名称或 URL 关键词，如 `番茄` 或 `blog.example.com`
+4. 运行
 
-# 改为：只对特定友链截图
-targets = [it for it in link_status if "blog.example.com" in it.get("link", "")]
-```
+**增量合并机制**：只有匹配的友链会被重新检测/截图，其余友链保留上次结果，`total_count` 不会减少。
 
 ---
 
