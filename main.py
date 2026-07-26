@@ -48,6 +48,7 @@ PROXY_URL_TEMPLATE = f"{os.getenv('PROXY_URL')}{{}}" if os.getenv("PROXY_URL") e
 SOURCE_URL = os.getenv("SOURCE_URL", "https://blog.liushen.fun/flink_count.json")  # 默认本地文件
 RESULT_FILE = "./result.json"
 AUTHOR_URL = os.getenv("AUTHOR_URL", "blog.liushen.fun")  # 作者URL，用于检测反链
+TARGET_LINK = os.getenv("TARGET_LINK", "").strip()  # 指定只检测某个友链（名称/URL子串匹配），留空=检测全部
 api_request_queue = Queue()
 
 if PROXY_URL_TEMPLATE:
@@ -59,6 +60,9 @@ if AUTHOR_URL:
     logging.info("作者 URL: %s", AUTHOR_URL)
 else:
     logging.warning("未提供作者 URL，将跳过友链页面检测")
+
+if TARGET_LINK:
+    logging.info("目标友链过滤: %s（仅检测匹配项，其余保留历史状态）", TARGET_LINK)
 
 def request_url(session, url, headers=HEADERS, desc="", timeout=15, verify=True, **kwargs):
     """统一封装的 GET 请求函数"""
@@ -253,9 +257,22 @@ def main():
 
         previous_results = load_previous_results()
 
+        # 目标过滤：仅检测指定友链（按名称或URL子串匹配），留空则检测全部
+        if TARGET_LINK:
+            check_list = [
+                it for it in link_list
+                if TARGET_LINK in it.get('name', '') or TARGET_LINK in it.get('link', '')
+            ]
+            logging.info(f"目标过滤 '{TARGET_LINK}'：匹配到 {len(check_list)} 个友链")
+            if not check_list:
+                logging.error("未匹配到任何友链，请检查 TARGET_LINK 是否正确")
+                return
+        else:
+            check_list = link_list
+
         with requests.Session() as session:
             with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-                results = list(executor.map(lambda item: check_link(item, session), link_list))
+                results = list(executor.map(lambda item: check_link(item, session), check_list))
 
             updated_api_results = handle_api_requests(session)
             for updated_item in updated_api_results:
@@ -291,7 +308,20 @@ def main():
             except Exception as e:
                 logging.error(f"处理链接时发生错误: {item}, 错误: {e}")
 
-        link_status = [entry for entry in link_status if entry["link"] in current_links]
+        if TARGET_LINK:
+            # 增量更新：本次只检测了部分友链，其余保留历史状态，按数据源顺序合并
+            new_by_link = {e['link']: e for e in link_status}
+            prev_by_link = {e.get('link'): e for e in previous_results.get("link_status", [])}
+            merged = []
+            for it in link_list:
+                lk = it['link']
+                if lk in new_by_link:
+                    merged.append(new_by_link[lk])
+                elif lk in prev_by_link:
+                    merged.append(prev_by_link[lk])
+            link_status = merged
+        else:
+            link_status = [entry for entry in link_status if entry["link"] in current_links]
 
         accessible = sum(1 for x in link_status if x["latency"] != -1)
         has_author_count = sum(1 for x in link_status if x["has_author_link"])

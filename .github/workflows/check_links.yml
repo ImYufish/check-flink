@@ -18,6 +18,11 @@ on:
           - screenshots_only   # 仅截图（使用最近一次状态检测数据）
           - both               # 状态检测 + 截图
         default: status_only
+      target_link:
+        description: '只处理指定友链（填名称或URL关键词，留空=处理全部）'
+        required: false
+        type: string
+        default: ''
 
 env:
   TZ: Asia/Shanghai
@@ -64,9 +69,11 @@ jobs:
         PROXY_URL: ${{ secrets.PROXY_URL }}
         SOURCE_URL: ${{ secrets.SOURCE_URL }}
         AUTHOR_URL: ${{ secrets.AUTHOR_URL }}
+        TARGET_LINK: ${{ inputs.target_link }}
       run: |
         echo "SOURCE_URL: $SOURCE_URL"
         echo "AUTHOR_URL: $AUTHOR_URL"
+        echo "TARGET_LINK: $TARGET_LINK"
         python main.py
 
     - name: Upload result.json as artifact
@@ -148,8 +155,10 @@ jobs:
         IMG_AUTH_CODE: ${{ secrets.IMG_AUTH_CODE }}
         CHROME_BIN: /usr/bin/google-chrome
         SCREENSHOT_WORKERS: '2'
+        TARGET_LINK: ${{ inputs.target_link }}
       run: |
         echo "IMG_UPLOAD_URL: $IMG_UPLOAD_URL"
+        echo "TARGET_LINK: $TARGET_LINK"
         python screenshot_runner.py
 
     - name: Upload updated result.json as artifact
