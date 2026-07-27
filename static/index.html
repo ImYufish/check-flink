@@ -486,10 +486,6 @@
         gap: 10px;
       }
 
-      .section-title.error-title {
-        border-left-color: var(--accent-red);
-      }
-
       .section-title .count {
         color: var(--text-muted);
         font-size: 0.9rem;
@@ -498,6 +494,16 @@
         padding: 2px 10px;
         border-radius: 12px;
         border: 1px solid var(--card-border);
+      }
+
+      /* 失效友链标题用红色左边框 */
+      .section-title.error-title {
+        border-left: 3px solid var(--accent-red);
+      }
+
+      .section-title.error-title .count {
+        color: var(--accent-red);
+        border-color: rgba(248, 113, 113, 0.3);
       }
 
       /* ============================================
@@ -532,6 +538,56 @@
         background: var(--card-bg-hover);
         transform: translateX(4px);
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+      }
+
+      /* 紧凑列表行（卡片视图下失效友链用） */
+      .link-row {
+        background: var(--card-bg);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--card-border);
+        border-radius: 10px;
+        padding: 10px 16px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        text-decoration: none;
+        color: inherit;
+        transition: all 0.2s ease;
+        animation: fadeInUp 0.5s ease both;
+      }
+      .link-row.is-error {
+        border-left: 3px solid var(--accent-red);
+      }
+      .link-row:hover {
+        background: var(--card-bg-hover);
+        transform: translateX(4px);
+      }
+      .row-name {
+        color: var(--text-primary);
+        font-weight: 500;
+        flex: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .row-host {
+        color: var(--text-muted);
+        font-size: 0.8rem;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      }
+      .row-fail {
+        color: var(--accent-red);
+        font-weight: 600;
+        font-size: 0.85rem;
+      }
+      .row-latency {
+        color: var(--text-muted);
+        font-size: 0.85rem;
+        font-variant-numeric: tabular-nums;
+      }
+      .row-latency.timeout {
+        color: var(--accent-red);
       }
 
       .link-name {
@@ -657,7 +713,6 @@
         border: 1px solid var(--card-border);
         border-radius: 16px;
         overflow: hidden;
-        text-decoration: none;
         color: inherit;
         display: flex;
         flex-direction: column;
@@ -675,17 +730,37 @@
           0 0 0 1px rgba(79, 158, 255, 0.3);
       }
 
-      .friend-card.is-error {
-        min-height: auto;
-        padding: 16px 18px;
-        flex-direction: row;
-        align-items: center;
-        gap: 12px;
-        border-left: 3px solid var(--accent-red);
+      /* 没有背景图时的 fallback：使用更显眼的渐变底色 */
+      .friend-card.no-bg {
+        background: linear-gradient(
+          135deg,
+          rgba(79, 158, 255, 0.15) 0%,
+          rgba(167, 139, 250, 0.15) 50%,
+          rgba(236, 72, 153, 0.15) 100%
+        );
       }
 
-      .friend-card.is-error:hover {
-        transform: translateY(-2px);
+      [data-theme="light"] .friend-card.no-bg {
+        background: linear-gradient(
+          135deg,
+          rgba(79, 158, 255, 0.18) 0%,
+          rgba(167, 139, 250, 0.18) 50%,
+          rgba(236, 72, 153, 0.18) 100%
+        );
+      }
+
+      /* 透明覆盖链接层（占满整个卡片） */
+      .card-link {
+        position: absolute;
+        inset: 0;
+        z-index: 5;
+        text-decoration: none;
+      }
+
+      /* 卡片内部任何 <a>（如反链按钮）z-index 高于 .card-link */
+      .backlink-icon {
+        position: relative;
+        z-index: 6;
       }
 
       .card-bg {
@@ -738,13 +813,6 @@
         display: flex;
         flex-direction: column;
         gap: 8px;
-        flex: 1;
-      }
-
-      .friend-card.is-error .card-content {
-        padding: 0;
-        flex-direction: row;
-        align-items: center;
         flex: 1;
       }
 
@@ -813,10 +881,6 @@
 
       [data-theme="light"] .card-footer {
         background: rgba(255, 255, 255, 0.4);
-      }
-
-      .friend-card.is-error .card-footer {
-        display: none;
       }
 
       .card-latency {
@@ -1081,6 +1145,16 @@
 
       <!-- 卡片视图 -->
       <div data-view-content="cards" hidden>
+        <!-- 失效友链（卡片视图下也用列表形式保持紧凑） -->
+        <h2 class="section-title error-title">
+          失效友链 <span class="count" id="error-count-cards">0</span>
+        </h2>
+        <section class="link-list" id="error-list-cards"></section>
+
+        <!-- 其他友链（卡片网格） -->
+        <h2 class="section-title">
+          其他友链 <span class="count" id="other-count-cards">0</span>
+        </h2>
         <section class="card-grid" id="card-grid"></section>
       </div>
 
@@ -1400,89 +1474,106 @@
 
       // ============================================
       // 6. 渲染卡片视图
+      // 关键设计：卡片用 <div> 容器，name 用 <a>，反链按钮独立
+      // 避免 <a> 嵌套 <a> 导致 HTML 解析器强制拆分的 bug
+      // 失效友链单独渲染到 #error-list-cards（保持列表形式）
       // ============================================
       function renderCardView(data) {
-        const grid = document.getElementById("card-grid");
+        const cardGrid = document.getElementById("card-grid");
+        const errorList = document.getElementById("error-list-cards");
+        const otherCount = document.getElementById("other-count-cards");
+        const errorCount = document.getElementById("error-count-cards");
+
         if (!data || !data.link_status || data.link_status.length === 0) {
-          grid.innerHTML =
-            '<div class="loading"><i class="fa-solid fa-circle-info"></i>暂无数据</div>';
+          cardGrid.innerHTML = '<div class="loading">暂无数据</div>';
+          errorList.innerHTML = "";
+          otherCount.textContent = "0";
+          errorCount.textContent = "0";
           return;
         }
 
-        grid.innerHTML = data.link_status
-          .map((link, i) => {
-            const isError = link.latency === -1;
-            const cls = statusClass(link.latency);
-            const label = statusLabel(link.latency);
-            const host = getHost(link.link);
-            const avatarUrl = `https://www.google.com/s2/favicons?domain=${host}&sz=64`;
+        // 分离失效友链和其他友链
+        const errorLinks = data.link_status.filter((l) => l.latency === -1);
+        const otherLinks = data.link_status.filter((l) => l.latency !== -1);
 
-            // 背景图：仅在有 siteshot 且非错误时使用
-            const bgStyle =
-              !isError && link.siteshot
-                ? `background-image: url('${escapeHtml(link.siteshot)}');`
-                : "";
-
-            let backlinkIcon = "";
-            if (link.linkpage && link.linkpage.trim() !== "") {
-              const icon = link.has_author_link
-                ? "fa-heart-circle-check backlink-true"
-                : "fa-heart-circle-xmark backlink-false";
-              const title = link.has_author_link ? "友链页面有反链" : "友链页面无反链";
-              backlinkIcon = `<a href="${escapeHtml(
-                link.linkpage
-              )}" target="_blank" rel="noopener noreferrer" class="backlink-icon ${link.has_author_link ? "backlink-true" : "backlink-false"}" title="${title}" onclick="event.stopPropagation()">
-                <i class="fa-solid ${icon}"></i>
-              </a>`;
-            }
-
-            if (isError) {
-              // 错误友链：简化卡片（无背景图）
-              return `
-              <div class="friend-card is-error" style="animation-delay: ${(i % 10) * 0.05}s">
-                <div class="card-content">
-                  <div class="card-header">
-                    <img class="card-avatar" src="${avatarUrl}" alt="" loading="lazy" onerror="this.style.opacity='0.3'">
-                    <div class="card-title-area">
-                      <h3 class="card-name">${escapeHtml(link.name)}</h3>
-                      <div class="card-host">${escapeHtml(host)}</div>
-                    </div>
-                  </div>
-                </div>
-                <div class="link-meta">
-                  <span class="fail-count">×${link.fail_count || 0}</span>
-                  ${backlinkIcon}
+        // 渲染失效友链（用与列表视图相同的紧凑列表样式）
+        errorList.innerHTML = errorLinks.length
+          ? errorLinks
+              .map((link) => {
+                const host = getHost(link.link);
+                const cls = statusClass(link.latency);
+                const label = statusLabel(link.latency);
+                return `
+                <a class="link-row is-error" href="${escapeHtml(link.link)}" target="_blank" rel="noopener noreferrer">
+                  <span class="row-name">${escapeHtml(link.name)}</span>
+                  <span class="row-host">${escapeHtml(host)}</span>
+                  <span class="row-fail">×${link.fail_count || 0}</span>
+                  <span class="row-latency timeout">${label}</span>
                   <span class="status-dot ${cls}" title="${label}"></span>
-                </div>
-              </div>
-            `;
-            }
+                </a>
+              `;
+              })
+              .join("")
+          : '<div class="loading">无失效友链 🎉</div>';
 
-            // 正常友链：富卡片
-            return `
-              <a class="friend-card" href="${escapeHtml(link.link)}" target="_blank" rel="noopener noreferrer" style="animation-delay: ${(i % 10) * 0.05}s">
-                <div class="card-bg" style="${bgStyle}"></div>
-                <div class="card-overlay"></div>
-                <div class="card-content">
-                  <div class="card-header">
-                    <img class="card-avatar" src="${avatarUrl}" alt="" loading="lazy" onerror="this.style.opacity='0.3'">
-                    <div class="card-title-area">
-                      <h3 class="card-name">${escapeHtml(link.name)}</h3>
-                      <div class="card-host">${escapeHtml(host)}</div>
+        // 渲染其他友链（卡片网格，<div> 容器避免 <a> 嵌套）
+        cardGrid.innerHTML = otherLinks.length
+          ? otherLinks
+              .map((link, i) => {
+                const cls = statusClass(link.latency);
+                const label = statusLabel(link.latency);
+                const host = getHost(link.link);
+                const avatarUrl = `https://www.google.com/s2/favicons?domain=${host}&sz=64`;
+
+                // 背景图：有 siteshot 就用
+                const hasShot = link.siteshot && link.siteshot.trim() !== "";
+                const bgStyle = hasShot
+                  ? `background-image: url('${escapeHtml(link.siteshot)}');`
+                  : "";
+
+                // 反链图标（独立 <a>，不嵌套）
+                let backlinkIcon = "";
+                if (link.linkpage && link.linkpage.trim() !== "") {
+                  const icon = link.has_author_link
+                    ? "fa-heart-circle-check backlink-true"
+                    : "fa-heart-circle-xmark backlink-false";
+                  const title = link.has_author_link
+                    ? "友链页面有反链"
+                    : "友链页面无反链";
+                  backlinkIcon = `<a class="backlink-icon ${link.has_author_link ? "backlink-true" : "backlink-false"}" href="${escapeHtml(link.linkpage)}" target="_blank" rel="noopener noreferrer" title="${title}" onclick="event.stopPropagation()">
+                    <i class="fa-solid ${icon}"></i>
+                  </a>`;
+                }
+
+                return `
+                <div class="friend-card ${hasShot ? "has-bg" : "no-bg"}" style="animation-delay: ${(i % 10) * 0.05}s">
+                  <a class="card-link" href="${escapeHtml(link.link)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(link.name)}"></a>
+                  <div class="card-bg" style="${bgStyle}"></div>
+                  <div class="card-overlay"></div>
+                  <div class="card-content">
+                    <div class="card-header">
+                      <img class="card-avatar" src="${avatarUrl}" alt="" loading="lazy" onerror="this.style.opacity='0.3'">
+                      <div class="card-title-area">
+                        <h3 class="card-name">${escapeHtml(link.name)}</h3>
+                        <div class="card-host">${escapeHtml(host)}</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="card-footer">
+                    <span class="card-latency">${label}</span>
+                    <div class="card-actions">
+                      ${backlinkIcon}
+                      <span class="status-dot ${cls}" title="${label}"></span>
                     </div>
                   </div>
                 </div>
-                <div class="card-footer">
-                  <span class="card-latency ${isError ? "timeout" : ""}">${label}</span>
-                  <div class="card-actions">
-                    ${backlinkIcon}
-                    <span class="status-dot ${cls}" title="${label}"></span>
-                  </div>
-                </div>
-              </a>
-            `;
-          })
-          .join("");
+              `;
+              })
+              .join("")
+          : '<div class="loading">无其他友链</div>';
+
+        otherCount.textContent = otherLinks.length;
+        errorCount.textContent = errorLinks.length;
       }
 
       // ============================================
