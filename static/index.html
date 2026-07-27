@@ -3,595 +3,1534 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0a0e27" />
     <meta name="robots" content="noindex, nofollow" />
-    <meta name="googlebot" content="noindex" />
-    <title>友链状态检测 - GitHub Action 监测</title>
-    <link
-      rel="stylesheet"
-      href="https://chinese-fonts-cdn.deno.dev/packages/jhlst/dist/京華老宋体v1_007/result.css"
-    />
+    <title>友链状态检测 · 星空</title>
+    <link rel="icon" href="/favicon.ico" />
     <link
       href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.7.2/css/all.min.css"
       rel="stylesheet"
     />
     <style>
+      /* ============================================
+       * 1. CSS 变量（暗黑/亮色双主题）
+       * ============================================ */
       :root {
-        --primary-color: #2c3e50;
-        --secondary-color: #3498db;
-        --accent-color: #e74c3c;
-        --text-color: #34495e;
-        --background-color: #e7f3ff;
-        --code-background-color: #efefef;
+        /* 暗黑/星空主题（默认） */
+        --bg-sky-top: #0a0e27;
+        --bg-sky-bottom: #1a1f3a;
+        --bg-overlay: radial-gradient(
+          ellipse at top,
+          var(--bg-sky-top) 0%,
+          var(--bg-sky-bottom) 100%
+        );
+        --star-color: rgba(255, 255, 255, 0.9);
+        --accent-blue: #4f9eff;
+        --accent-pink: #ff6b9d;
+        --accent-gold: #ffd93d;
+        --accent-green: #4ade80;
+        --accent-red: #f87171;
+        --text-primary: #e4e8f1;
+        --text-secondary: #8a94b0;
+        --text-muted: #5a6480;
+        --card-bg: rgba(255, 255, 255, 0.04);
+        --card-bg-hover: rgba(255, 255, 255, 0.08);
+        --card-border: rgba(255, 255, 255, 0.1);
+        --card-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+        --glass-blur: blur(20px) saturate(180%);
+        --cloud-opacity: 0;
+        --header-gradient: linear-gradient(
+          135deg,
+          var(--accent-blue),
+          var(--accent-pink)
+        );
       }
 
-      .poem-background {
-        position: fixed;
-        bottom: calc(50% - 300px);
-        left: 50%;
-        z-index: -1;
-        opacity: 0.15;
-        width: 2000px;
-        text-align: left;
-        color: #93a1a9;
-        pointer-events: none;
-        line-height: 1.8;
+      [data-theme="light"] {
+        --bg-sky-top: #87ceeb;
+        --bg-sky-bottom: #e0f6ff;
+        --bg-overlay: linear-gradient(
+          180deg,
+          var(--bg-sky-top) 0%,
+          var(--bg-sky-bottom) 100%
+        );
+        --star-color: rgba(255, 217, 61, 0.5);
+        --text-primary: #2c3e50;
+        --text-secondary: #5a6c7d;
+        --text-muted: #95a5a6;
+        --card-bg: rgba(255, 255, 255, 0.7);
+        --card-bg-hover: rgba(255, 255, 255, 0.9);
+        --card-border: rgba(255, 255, 255, 0.5);
+        --card-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+        --cloud-opacity: 0.85;
+        --header-gradient: linear-gradient(
+          135deg,
+          #3498db,
+          #9b59b6
+        );
       }
 
-      .poem-background p {
+      /* ============================================
+       * 2. 全局重置
+       * ============================================ */
+      * {
         margin: 0;
-        font-size: 4rem;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        min-height: 100vh;
+        overflow-x: hidden;
       }
 
       body {
-        font-family: "KingHwa_OldSong", "Noto Serif SC", serif;
-        margin: 0;
-        padding: 40px 20px;
-        background-color: var(--background-color);
-        color: var(--text-color);
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica,
+          Arial, sans-serif;
+        background: var(--bg-overlay);
+        color: var(--text-primary);
+        line-height: 1.6;
+        position: relative;
+        min-height: 100vh;
+        padding: 40px 20px 20px;
+        transition:
+          background 0.6s ease,
+          color 0.3s ease;
+      }
+
+      /* ============================================
+       * 3. 星空背景层
+       * ============================================ */
+      #stars-canvas {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: -3;
+        pointer-events: none;
+        transition: opacity 0.6s ease;
+      }
+
+      [data-theme="light"] #stars-canvas {
+        opacity: 0.3;
+      }
+
+      /* 流星 */
+      .shooting-star {
+        position: fixed;
+        width: 100px;
+        height: 1px;
+        background: linear-gradient(
+          90deg,
+          rgba(255, 255, 255, 0) 0%,
+          rgba(255, 255, 255, 0.8) 50%,
+          rgba(255, 255, 255, 1) 100%
+        );
+        z-index: -2;
+        pointer-events: none;
+        transform-origin: 0 50%;
+        animation: shoot 1.2s linear forwards;
+      }
+
+      @keyframes shoot {
+        0% {
+          transform: rotate(35deg) translateX(0);
+          opacity: 1;
+        }
+        100% {
+          transform: rotate(35deg) translateX(800px);
+          opacity: 0;
+        }
+      }
+
+      [data-theme="light"] .shooting-star {
+        display: none;
+      }
+
+      /* 云朵（仅白天显示） */
+      .cloud {
+        position: fixed;
+        background: rgba(255, 255, 255, 0.95);
+        border-radius: 100px;
+        z-index: -2;
+        pointer-events: none;
+        opacity: var(--cloud-opacity);
+        transition: opacity 0.6s ease;
+        filter: blur(2px);
+        box-shadow: 0 4px 20px rgba(255, 255, 255, 0.5);
+      }
+
+      .cloud::before,
+      .cloud::after {
+        content: "";
+        position: absolute;
+        background: rgba(255, 255, 255, 0.95);
+        border-radius: 50%;
+      }
+
+      .cloud-1 {
+        width: 120px;
+        height: 40px;
+        top: 15%;
+        left: -150px;
+        animation: float-cloud 60s linear infinite;
+      }
+      .cloud-1::before {
+        width: 60px;
+        height: 60px;
+        top: -30px;
+        left: 20px;
+      }
+      .cloud-1::after {
+        width: 50px;
+        height: 50px;
+        top: -25px;
+        left: 60px;
+      }
+
+      .cloud-2 {
+        width: 160px;
+        height: 50px;
+        top: 35%;
+        left: -200px;
+        animation: float-cloud 80s linear infinite;
+        animation-delay: -20s;
+      }
+      .cloud-2::before {
+        width: 80px;
+        height: 80px;
+        top: -40px;
+        left: 30px;
+      }
+      .cloud-2::after {
+        width: 70px;
+        height: 70px;
+        top: -35px;
+        left: 80px;
+      }
+
+      .cloud-3 {
+        width: 100px;
+        height: 35px;
+        top: 60%;
+        left: -150px;
+        animation: float-cloud 50s linear infinite;
+        animation-delay: -35s;
+      }
+      .cloud-3::before {
+        width: 50px;
+        height: 50px;
+        top: -25px;
+        left: 15px;
+      }
+      .cloud-3::after {
+        width: 40px;
+        height: 40px;
+        top: -20px;
+        left: 50px;
+      }
+
+      .cloud-4 {
+        width: 140px;
+        height: 45px;
+        top: 80%;
+        left: -180px;
+        animation: float-cloud 70s linear infinite;
+        animation-delay: -10s;
+      }
+      .cloud-4::before {
+        width: 70px;
+        height: 70px;
+        top: -35px;
+        left: 25px;
+      }
+      .cloud-4::after {
+        width: 60px;
+        height: 60px;
+        top: -30px;
+        left: 70px;
+      }
+
+      @keyframes float-cloud {
+        0% {
+          transform: translateX(0);
+        }
+        100% {
+          transform: translateX(calc(100vw + 300px));
+        }
+      }
+
+      /* ============================================
+       * 4. 右上角控制按钮
+       * ============================================ */
+      .control-buttons {
+        position: fixed;
+        top: 20px;
+        right: 20px;
         display: flex;
         flex-direction: column;
+        gap: 12px;
+        z-index: 100;
+      }
+
+      .control-btn {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        background: var(--card-bg);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--card-border);
+        color: var(--text-primary);
+        font-size: 18px;
+        cursor: pointer;
+        display: flex;
         align-items: center;
+        justify-content: center;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: var(--card-shadow);
       }
 
+      .control-btn:hover {
+        background: var(--card-bg-hover);
+        transform: translateY(-2px) scale(1.05);
+        box-shadow: 0 6px 28px rgba(79, 158, 255, 0.3);
+      }
+
+      .control-btn:active {
+        transform: translateY(0) scale(0.95);
+      }
+
+      /* ============================================
+       * 5. 主容器
+       * ============================================ */
       .container {
-        max-width: 900px;
-        width: 100%;
-        padding: 0 20px;
+        max-width: 1200px;
+        margin: 0 auto;
+        position: relative;
+        z-index: 1;
       }
 
+      /* ============================================
+       * 6. 头部
+       * ============================================ */
       .header {
         text-align: center;
         margin-bottom: 40px;
-        position: relative;
+        animation: fadeInUp 0.8s ease;
       }
 
-      h1 {
-        font-size: 2.8rem;
-        color: var(--primary-color);
-        margin: 20px 0;
-        position: relative;
+      .title {
+        font-size: 2.6rem;
+        font-weight: 700;
+        background: var(--header-gradient);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 12px;
+        letter-spacing: 2px;
       }
 
-      h1::after {
-        content: "";
-        display: block;
-        width: 60%;
-        height: 3px;
-        background: var(--secondary-color);
-        margin: 10px auto 0;
+      .title-star {
+        display: inline-block;
+        color: var(--accent-gold);
+        -webkit-text-fill-color: var(--accent-gold);
+        font-size: 1.8rem;
+        margin: 0 12px;
+        animation: star-spin 4s ease-in-out infinite;
+      }
+
+      @keyframes star-spin {
+        0%,
+        100% {
+          transform: rotate(0deg) scale(1);
+          opacity: 0.8;
+        }
+        50% {
+          transform: rotate(180deg) scale(1.2);
+          opacity: 1;
+        }
       }
 
       .subtitle {
-        font-size: 1.1rem;
-        color: #7f8c8d;
-        max-width: 600px;
-        margin: 0 auto;
-        line-height: 1.6;
-      }
-
-      .total-info {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 15px;
-        margin-top: 30px;
-      }
-
-      @media (min-width: 1200px) {
-        .total-info {
-          grid-template-columns: repeat(4, 1fr);
-        }
-      }
-
-      @media (max-width: 380px) {
-        .total-info {
-          grid-template-columns: repeat(1, 1fr);
-        }
-      }
-
-      .total-status-card {
-        background: #fff;
-        border-radius: 8px;
-        padding: 15px;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-        text-align: center;
+        color: var(--text-secondary);
         font-size: 1rem;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        transition: all 0.2s ease-in-out;
+        margin-bottom: 8px;
       }
 
-      .total-status-card span {
-        font-weight: bold;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+      .update-time {
+        color: var(--text-muted);
+        font-size: 0.9rem;
       }
 
-      .total-status-card:hover {
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      .update-time span {
+        color: var(--accent-blue);
+        font-weight: 600;
       }
 
-      .status-grid {
+      /* ============================================
+       * 7. 统计卡片
+       * ============================================ */
+      .stats-grid {
         display: grid;
-        gap: 15px;
-        margin-top: 15px;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 16px;
+        margin-bottom: 40px;
       }
 
-      .status-grid.other {
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      }
-
-      .status-grid.error {
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-      }
-
-      .fail_counts {
-        margin-right: 10px;
-        color: #000000a5;
-      }
-
-      .status-card {
+      .stat-card {
+        background: var(--card-bg);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--card-border);
+        border-radius: 16px;
+        padding: 20px;
         display: flex;
-        background: #fff;
-        border-radius: 8px;
-        padding: 15px;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-        font-size: 1rem;
-        justify-content: space-between;
         align-items: center;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-        transition: all 0.2s ease-in-out;
-      }
-
-      .status-card:hover {
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-      }
-
-      .status-link {
-        color: var(--primary-color);
-        text-decoration: none;
-        font-weight: bold;
-        transition: all 0.2s ease-in-out;
-        /* 显示为一行，超出显示为省略号 */
-        white-space: nowrap;
+        gap: 16px;
+        box-shadow: var(--card-shadow);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        position: relative;
         overflow: hidden;
-        text-overflow: ellipsis;
+      }
+
+      .stat-card::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          rgba(255, 255, 255, 0.05),
+          transparent
+        );
+        transition: left 0.6s ease;
+      }
+
+      .stat-card:hover::before {
+        left: 100%;
+      }
+
+      .stat-card:hover {
+        background: var(--card-bg-hover);
+        transform: translateY(-3px);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      }
+
+      .stat-icon {
+        font-size: 28px;
+        width: 48px;
+        height: 48px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      .stat-total .stat-icon {
+        color: var(--accent-blue);
+        background: rgba(79, 158, 255, 0.15);
+      }
+      .stat-normal .stat-icon {
+        color: var(--accent-green);
+        background: rgba(74, 222, 128, 0.15);
+      }
+      .stat-error .stat-icon {
+        color: var(--accent-red);
+        background: rgba(248, 113, 113, 0.15);
+      }
+      .stat-backlink .stat-icon {
+        color: var(--accent-pink);
+        background: rgba(255, 107, 157, 0.15);
+      }
+
+      .stat-info {
+        display: flex;
+        flex-direction: column;
         flex: 1;
-        margin-right: 10px;
       }
 
-      .status-link:hover {
-        color: var(--secondary-color);
+      .stat-label {
+        color: var(--text-secondary);
+        font-size: 0.85rem;
+        margin-bottom: 4px;
       }
 
+      .stat-value {
+        color: var(--text-primary);
+        font-size: 1.8rem;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ============================================
+       * 8. 章节标题
+       * ============================================ */
+      .section-title {
+        color: var(--text-primary);
+        font-size: 1.3rem;
+        font-weight: 600;
+        margin: 30px 0 16px;
+        padding-left: 12px;
+        border-left: 3px solid var(--accent-blue);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .section-title.error-title {
+        border-left-color: var(--accent-red);
+      }
+
+      .section-title .count {
+        color: var(--text-muted);
+        font-size: 0.9rem;
+        font-weight: 400;
+        background: var(--card-bg);
+        padding: 2px 10px;
+        border-radius: 12px;
+        border: 1px solid var(--card-border);
+      }
+
+      /* ============================================
+       * 9. 列表视图
+       * ============================================ */
+      .link-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 12px;
+      }
+
+      .link-item {
+        background: var(--card-bg);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--card-border);
+        border-radius: 12px;
+        padding: 14px 18px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        animation: fadeInUp 0.6s ease both;
+      }
+
+      .link-item.is-error {
+        border-left: 3px solid var(--accent-red);
+      }
+
+      .link-item:hover {
+        background: var(--card-bg-hover);
+        transform: translateX(4px);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+      }
+
+      .link-name {
+        color: var(--text-primary);
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 0.95rem;
+        flex: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        transition: color 0.2s ease;
+      }
+
+      .link-name:hover {
+        color: var(--accent-blue);
+      }
+
+      .link-meta {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-shrink: 0;
+        font-size: 0.8rem;
+        color: var(--text-muted);
+      }
+
+      .fail-count {
+        color: var(--accent-red);
+        font-weight: 600;
+      }
+
+      /* ============================================
+       * 10. 状态点
+       * ============================================ */
       .status-dot {
         display: inline-block;
-        width: 12px;
-        height: 12px;
+        width: 10px;
+        height: 10px;
         border-radius: 50%;
-        margin-right: 6px;
         position: relative;
       }
 
       .status-dot::before {
         content: "";
         position: absolute;
-        top: -4px;
-        left: -4px;
-        width: 20px;
-        height: 20px;
+        top: -3px;
+        left: -3px;
+        width: 16px;
+        height: 16px;
         border-radius: 50%;
-        animation: pulse 1.5s infinite;
+        animation: pulse 1.8s infinite;
+      }
+
+      .status-normal {
+        background: var(--accent-green);
+        box-shadow: 0 0 8px var(--accent-green);
+      }
+      .status-normal::before {
+        background: rgba(74, 222, 128, 0.3);
+      }
+
+      .status-slow {
+        background: var(--accent-gold);
+        box-shadow: 0 0 8px var(--accent-gold);
+      }
+      .status-slow::before {
+        background: rgba(255, 217, 61, 0.3);
+      }
+
+      .status-error {
+        background: var(--accent-red);
+        box-shadow: 0 0 8px var(--accent-red);
+      }
+      .status-error::before {
+        background: rgba(248, 113, 113, 0.3);
       }
 
       @keyframes pulse {
-        0% {
-          transform: scale(1);
-          opacity: 1;
-        }
-
-        50% {
-          transform: scale(1.5);
-          opacity: 0.5;
-        }
-
+        0%,
         100% {
           transform: scale(1);
           opacity: 1;
         }
+        50% {
+          transform: scale(1.6);
+          opacity: 0;
+        }
       }
 
-      .status-normal {
-        background: green;
-      }
-
-      .status-normal::before {
-        background-color: rgba(0, 128, 0, 0.2);
-      }
-
-      .status-slow {
-        background: rgb(255, 200, 0);
-      }
-
-      .status-slow::before {
-        background-color: rgba(255, 174, 0, 0.2);
-      }
-
-      .status-error {
-        background: red;
-      }
-
-      .status-error::before {
-        background-color: rgba(255, 0, 0, 0.2);
-      }
-
-      /* 新增反链状态样式 */
-      .backlink-status {
-        display: inline-flex;
-        align-items: center;
-        margin: 0 8px;
-        text-decoration: none;
-        transition: all 0.2s ease-in-out;
-      }
-
-      .backlink-status:hover {
-        transform: scale(1.1);
-      }
-
+      /* 反链图标 */
       .backlink-icon {
-        font-size: 16px;
+        font-size: 14px;
+        text-decoration: none;
+        transition: all 0.2s ease;
       }
 
       .backlink-true {
-        color: #27ae60;
+        color: var(--accent-green);
       }
-
       .backlink-false {
-        color: #e74c3c;
+        color: var(--accent-red);
+      }
+      .backlink-icon:hover {
+        transform: scale(1.3);
       }
 
-      .status-indicators {
+      /* ============================================
+       * 11. 卡片视图
+       * ============================================ */
+      .card-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 20px;
+        margin-bottom: 30px;
+      }
+
+      .friend-card {
+        position: relative;
+        background: var(--card-bg);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--card-border);
+        border-radius: 16px;
+        overflow: hidden;
+        text-decoration: none;
+        color: inherit;
+        display: flex;
+        flex-direction: column;
+        min-height: 220px;
+        box-shadow: var(--card-shadow);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        animation: fadeInUp 0.6s ease both;
+      }
+
+      .friend-card:hover {
+        transform: translateY(-6px);
+        border-color: var(--accent-blue);
+        box-shadow:
+          0 12px 36px rgba(0, 0, 0, 0.4),
+          0 0 0 1px rgba(79, 158, 255, 0.3);
+      }
+
+      .friend-card.is-error {
+        min-height: auto;
+        padding: 16px 18px;
+        flex-direction: row;
+        align-items: center;
+        gap: 12px;
+        border-left: 3px solid var(--accent-red);
+      }
+
+      .friend-card.is-error:hover {
+        transform: translateY(-2px);
+      }
+
+      .card-bg {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-size: cover;
+        background-position: center top;
+        background-repeat: no-repeat;
+        opacity: 0.4;
+        z-index: 0;
+        transition: opacity 0.4s ease, transform 0.6s ease;
+      }
+
+      .friend-card:hover .card-bg {
+        opacity: 0.55;
+        transform: scale(1.05);
+      }
+
+      .card-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(
+          180deg,
+          rgba(10, 14, 39, 0.4) 0%,
+          rgba(10, 14, 39, 0.85) 60%,
+          rgba(10, 14, 39, 0.95) 100%
+        );
+        z-index: 1;
+      }
+
+      [data-theme="light"] .card-overlay {
+        background: linear-gradient(
+          180deg,
+          rgba(255, 255, 255, 0.2) 0%,
+          rgba(255, 255, 255, 0.7) 60%,
+          rgba(255, 255, 255, 0.95) 100%
+        );
+      }
+
+      .card-content {
+        position: relative;
+        z-index: 2;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        flex: 1;
+      }
+
+      .friend-card.is-error .card-content {
+        padding: 0;
+        flex-direction: row;
+        align-items: center;
+        flex: 1;
+      }
+
+      .card-header {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 12px;
+        margin-bottom: 8px;
       }
 
-      footer {
-        margin-top: 50px;
-        padding-top: 30px;
-        border-top: 1px solid #ecf0f1;
-        width: 100%;
+      .card-avatar {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.1);
+        border: 2px solid var(--card-border);
+        flex-shrink: 0;
+        object-fit: cover;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+      }
+
+      .card-title-area {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .card-name {
+        color: var(--text-primary);
+        font-size: 1.05rem;
+        font-weight: 600;
+        margin: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+      }
+
+      [data-theme="light"] .card-name {
+        text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
+      }
+
+      .card-host {
+        color: var(--text-secondary);
+        font-size: 0.8rem;
+        font-family:
+          ui-monospace, "SF Mono", Menlo, Monaco, "Cascadia Code", monospace;
+      }
+
+      [data-theme="light"] .card-host {
+        color: var(--text-secondary);
+      }
+
+      .card-footer {
+        position: relative;
+        z-index: 2;
+        padding: 12px 20px;
+        border-top: 1px solid var(--card-border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        background: rgba(0, 0, 0, 0.2);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+      }
+
+      [data-theme="light"] .card-footer {
+        background: rgba(255, 255, 255, 0.4);
+      }
+
+      .friend-card.is-error .card-footer {
+        display: none;
+      }
+
+      .card-latency {
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .card-latency.timeout {
+        color: var(--accent-red);
+      }
+
+      .card-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      /* ============================================
+       * 12. 加载状态
+       * ============================================ */
+      .loading {
         text-align: center;
-        color: #95a5a6;
+        color: var(--text-muted);
+        padding: 60px 20px;
+        font-size: 1rem;
+      }
+
+      .loading i {
+        margin-right: 8px;
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes spin {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* ============================================
+       * 13. 页脚
+       * ============================================ */
+      footer {
+        margin-top: 60px;
+        padding-top: 30px;
+        border-top: 1px solid var(--card-border);
+        text-align: center;
+        color: var(--text-muted);
+        font-size: 0.85rem;
       }
 
       footer a {
-        color: #95a5a6;
+        color: var(--text-secondary);
         text-decoration: none;
-        transition: all 0.2s ease-in-out;
+        transition: color 0.2s ease;
       }
 
       footer a:hover {
-        color: var(--secondary-color);
+        color: var(--accent-blue);
       }
 
-      .github-icon {
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        z-index: 1000;
-        background: #fff;
-        border-radius: 50%;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-        width: 45px;
-        height: 45px;
-
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        transition: all 0.2s ease-in-out;
+      .footer-stats,
+      .footer-links,
+      .footer-copyright {
+        margin-bottom: 8px;
       }
 
-      .github-icon:hover {
-        box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
+      /* ============================================
+       * 14. 通用动画
+       * ============================================ */
+      @keyframes fadeInUp {
+        from {
+          opacity: 0;
+          transform: translateY(20px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
       }
-      .github-icon svg {
-        margin-top: 7px;
-        fill: #2c3e50;
-        width: 25px;
-        height: 25px;
+
+      /* ============================================
+       * 15. 响应式
+       * ============================================ */
+      @media (max-width: 768px) {
+        body {
+          padding: 70px 12px 20px;
+        }
+
+        .control-btn {
+          width: 42px;
+          height: 42px;
+          font-size: 16px;
+        }
+
+        .control-buttons {
+          top: 12px;
+          right: 12px;
+          gap: 8px;
+        }
+
+        .title {
+          font-size: 1.8rem;
+        }
+
+        .title-star {
+          font-size: 1.2rem;
+          margin: 0 6px;
+        }
+
+        .stats-grid {
+          grid-template-columns: repeat(2, 1fr);
+          gap: 10px;
+        }
+
+        .stat-card {
+          padding: 14px;
+        }
+
+        .stat-icon {
+          font-size: 22px;
+          width: 38px;
+          height: 38px;
+        }
+
+        .stat-value {
+          font-size: 1.4rem;
+        }
+
+        .card-grid {
+          grid-template-columns: 1fr;
+          gap: 14px;
+        }
+
+        .section-title {
+          font-size: 1.1rem;
+        }
+      }
+
+      @media (max-width: 480px) {
+        .stats-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      /* 滚动条美化 */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: var(--card-border);
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: var(--text-muted);
       }
     </style>
   </head>
 
-  <body>
-    <div class="poem-background">
-      <p>凤凰台上凤凰游，凤去台空江自流。</p>
-      <p>吴宫花草埋幽径，晋代衣冠成古丘。</p>
-      <p>三山半落青天外，二水中分白鹭洲。</p>
-      <p>总为浮云能蔽日，长安不见使人愁。</p>
-      <p>- —— 节选自 李白《登金陵凤凰台》</p>
+  <body data-theme="dark" data-view="list">
+    <!-- 星空背景层 -->
+    <canvas id="stars-canvas"></canvas>
+    <div id="clouds-container">
+      <div class="cloud cloud-1"></div>
+      <div class="cloud cloud-2"></div>
+      <div class="cloud cloud-3"></div>
+      <div class="cloud cloud-4"></div>
     </div>
 
-    <div class="github-icon">
-      <a
-        href="https://github.com/willow-god/check-flink"
-        target="_blank"
-        rel="noopener noreferrer"
+    <!-- 右上角控制按钮 -->
+    <div class="control-buttons">
+      <button
+        id="theme-toggle"
+        class="control-btn"
+        title="切换主题"
+        aria-label="切换主题"
       >
-        <svg
-          t="1742361434983"
-          class="icon"
-          viewBox="0 0 1024 1024"
-          version="1.1"
-          xmlns="http://www.w3.org/2000/svg"
-          p-id="2610"
-        >
-          <path
-            d="M850.346667 155.008a42.666667 42.666667 0 0 0-22.741334-23.509333c-8.704-3.754667-85.717333-33.322667-200.32 39.168H396.714667c-114.773333-72.618667-191.701333-42.922667-200.32-39.168a42.88 42.88 0 0 0-22.741334 23.466666c-26.197333 66.218667-18.048 136.448-7.850666 176.896C134.272 374.016 128 413.098667 128 469.333333c0 177.877333 127.104 227.882667 226.730667 246.272a189.568 189.568 0 0 0-13.013334 46.549334A44.373333 44.373333 0 0 0 341.333333 768v38.613333c-19.498667-4.138667-41.002667-11.946667-55.168-26.112C238.08 732.416 188.330667 682.666667 128 682.666667v85.333333c25.002667 0 65.365333 40.362667 97.834667 72.832 51.029333 51.029333 129.066667 55.253333 153.386666 55.253333 3.114667 0 5.376-0.085333 6.528-0.128A42.666667 42.666667 0 0 0 426.666667 853.333333v-82.090666c4.266667-24.746667 20.224-49.621333 27.946666-56.362667a42.666667 42.666667 0 0 0-23.125333-74.581333C293.333333 624.554667 213.333333 591.488 213.333333 469.333333c0-53.12 5.632-70.741333 31.573334-99.285333 11.008-12.117333 14.08-29.568 7.978666-44.8-4.821333-11.904-18.773333-65.450667-6.485333-117.546667 20.650667-1.578667 59.904 4.565333 113.706667 40.96C367.104 253.44 375.466667 256 384 256h256a42.666667 42.666667 0 0 0 23.936-7.338667c54.016-36.522667 92.970667-41.770667 113.664-41.130666 12.330667 52.224-1.578667 105.770667-6.4 117.674666a42.666667 42.666667 0 0 0 8.021333 44.928C805.077333 398.464 810.666667 416.085333 810.666667 469.333333c0 122.581333-79.957333 155.52-218.069334 170.922667a42.666667 42.666667 0 0 0-23.125333 74.709333c19.797333 17.066667 27.861333 32.469333 27.861333 53.034667v128h85.333334v-128c0-20.437333-3.925333-38.101333-9.770667-53.12C769.92 695.765333 896 643.712 896 469.333333c0-56.362667-6.272-95.530667-37.76-137.514666 10.197333-40.405333 18.261333-110.506667-7.893333-176.810667z"
-            p-id="2611"
-          ></path>
-        </svg>
-      </a>
+        <i class="fa-solid fa-sun"></i>
+      </button>
+      <button
+        id="view-toggle"
+        class="control-btn"
+        title="切换视图"
+        aria-label="切换视图"
+      >
+        <i class="fa-solid fa-th-large"></i>
+      </button>
     </div>
 
+    <!-- 主体内容 -->
     <div class="container">
       <header class="header">
-        <h1>友链状态检测</h1>
+        <h1 class="title">
+          <span class="title-star">✦</span>
+          友链状态检测
+          <span class="title-star">✦</span>
+        </h1>
         <p class="subtitle">
-          基于 GitHub Action 监测友链状态，结合 Cloudflare Worker 和 v2.xxapi.cn
-          提高准确率
+          基于 GitHub Action 自动监测友链可达性 · 每 12 小时巡检一次
         </p>
-        <p class="subtitle">更新时间：<span id="update-time"></span></p>
+        <p class="update-time">
+          最后更新：<span id="update-time">加载中...</span>
+        </p>
       </header>
 
-      <section class="total-info" id="total-info">
-        <div class="total-status-card">
-          <div class="total-status-card-title">
-            <i class="fa-solid fa-users"></i>
-            <span>友链总数</span>
+      <!-- 统计卡 -->
+      <section class="stats-grid">
+        <div class="stat-card stat-total">
+          <i class="fa-solid fa-users stat-icon"></i>
+          <div class="stat-info">
+            <span class="stat-label">友链总数</span>
+            <span class="stat-value" id="total-links">--</span>
           </div>
-          <span id="total-links">加载中...</span>
         </div>
-        <div class="total-status-card">
-          <div class="total-status-card-title">
-            <i class="fa-solid fa-circle-check"></i>
-            <span>正常友链</span>
+        <div class="stat-card stat-normal">
+          <i class="fa-solid fa-circle-check stat-icon"></i>
+          <div class="stat-info">
+            <span class="stat-label">正常友链</span>
+            <span class="stat-value" id="normal-links">--</span>
           </div>
-          <span id="normal-links">加载中...</span>
         </div>
-        <div class="total-status-card">
-          <div class="total-status-card-title">
-            <i class="fa-solid fa-circle-xmark"></i>
-            <span>错误友链</span>
+        <div class="stat-card stat-error">
+          <i class="fa-solid fa-circle-xmark stat-icon"></i>
+          <div class="stat-info">
+            <span class="stat-label">错误友链</span>
+            <span class="stat-value" id="error-links">--</span>
           </div>
-          <span id="error-links">加载中...</span>
         </div>
-        <div class="total-status-card">
-          <div class="total-status-card-title">
-            <i class="fa-solid fa-link"></i>
-            <span>存在反链</span>
+        <div class="stat-card stat-backlink">
+          <i class="fa-solid fa-heart stat-icon"></i>
+          <div class="stat-info">
+            <span class="stat-label">存在反链</span>
+            <span class="stat-value" id="backlink-count">--</span>
           </div>
-          <span id="backlink-count">加载中...</span>
         </div>
       </section>
 
-      <hr
-        style="
-          width: 100%;
-          margin: 15px 0;
-          border: 0;
-          border-top: 2px solid #00000021;
-        "
-      />
+      <!-- 列表视图 -->
+      <div data-view-content="list">
+        <h2 class="section-title error-title">
+          失效友链 <span class="count" id="error-count">0</span>
+        </h2>
+        <section class="link-list" id="error-list">
+          <div class="loading">
+            <i class="fa-solid fa-spinner"></i>正在加载友链数据...
+          </div>
+        </section>
 
-      <h2 class="error-link-h2">失效友链</h2>
-      <section class="status-grid error" id="status-container-error"></section>
+        <h2 class="section-title">
+          其他友链 <span class="count" id="other-count">0</span>
+        </h2>
+        <section class="link-list" id="other-list"></section>
+      </div>
 
-      <hr
-        class="error-link-hr"
-        style="
-          width: 100%;
-          margin: 15px 0;
-          border: 0;
-          border-top: 2px solid #00000021;
-        "
-      />
-
-      <h2 class="other-link-h2">其他友链</h2>
-      <section class="status-grid other" id="status-container-other"></section>
+      <!-- 卡片视图 -->
+      <div data-view-content="cards" hidden>
+        <section class="card-grid" id="card-grid"></section>
+      </div>
 
       <footer>
         <script defer src="https://cn.vercount.one/js"></script>
-
-        <div style="margin-bottom: 0.5em">
-          网站总请求量：<span id="vercount_value_site_pv">🤕</span> |
-          独立访客数：<span id="vercount_value_site_uv">🤕</span>
+        <div class="footer-stats">
+          网站总请求量：<span id="vercount_value_site_pv">--</span> |
+          独立访客数：<span id="vercount_value_site_uv">--</span>
         </div>
-
-        <div style="margin-bottom: 0.5em">
+        <div class="footer-links">
           Powered by
           <a
             href="https://github.com/features/actions"
             target="_blank"
-            rel="nofollow noopener noreferrer"
+            rel="nofollow noopener"
             >GitHub Actions</a
           >
-          |
+          ·
           <a
             href="https://workers.cloudflare.com/"
             target="_blank"
-            rel="nofollow noopener noreferrer"
+            rel="nofollow noopener"
             >Cloudflare Workers</a
           >
-          |
-          <a
-            href="https://xxapi.cn/"
-            target="_blank"
-            rel="nofollow noopener noreferrer"
-            >小小API</a
+          ·
+          <a href="https://cfbed.sanyue.de/" target="_blank" rel="nofollow noopener"
+            >cfbed</a
           >
-          |
+          ·
           <a
-            href="https://api.nsmao.net/"
+            href="https://image.thum.io/"
             target="_blank"
-            rel="nofollow noopener noreferrer"
-            >奶思猫</a
+            rel="nofollow noopener"
+            >thum.io</a
           >
         </div>
-
-        <div>
-          项目地址: <a
-            href="https://github.com/willow-god/check-flink"
+        <div class="footer-copyright">
+          <a
+            href="https://github.com/fqzlr/check-flink"
             target="_blank"
-            rel="nofollow noopener noreferrer"
+            rel="nofollow noopener"
             >check-flink</a
           >
-          | MIT License © <span id="year"></span> |
-          <a
-            href="https://www.liushen.fun/"
-            target="_blank"
-            rel="nofollow noopener noreferrer"
-            >LiuShen</a
+          · MIT License © <span id="year"></span> ·
+          <a href="https://fqzlr.com/" target="_blank" rel="nofollow noopener"
+            >fqzlr</a
           >
         </div>
-
-        <script>
-          // 动态年份显示
-          document.getElementById("year").textContent =
-            new Date().getFullYear();
-        </script>
       </footer>
     </div>
 
     <script>
-      fetch("/result.json")
-        .then((response) => response.json())
-        .then((data) => {
-          // 更新更新时间
-          const updateTime = data.timestamp;
-          const updateTimeElement = document.getElementById("update-time");
-          updateTimeElement.textContent = updateTime;
-          const container_error = document.getElementById(
-            "status-container-error"
-          );
-          const container_other = document.getElementById(
-            "status-container-other"
-          );
-          let statusHTML = "";
-          const sortedLinks = data.link_status.sort((a, b) =>
-            a.latency === -1 ? -1 : b.latency === -1 ? 1 : b.latency - a.latency
-          );
+      // ============================================
+      // 1. 星空背景生成（Canvas）
+      // ============================================
+      (function initStarfield() {
+        const canvas = document.getElementById("stars-canvas");
+        const ctx = canvas.getContext("2d");
+        let stars = [];
+        let mouseX = 0;
+        let mouseY = 0;
+        let width = 0;
+        let height = 0;
+        let animFrameId = null;
 
-          let totalLinks = 0;
-          let normalLinks = 0;
-          let slowLinks = 0;
-          let errorLinks = 0;
-          let backlinkCount = 0;
-          let errorLinksHTML = "";
-          let otherLinksHTML = "";
+        function resize() {
+          width = canvas.width = window.innerWidth;
+          height = canvas.height = window.innerHeight;
+          generateStars();
+        }
 
-          sortedLinks.forEach((link) => {
-            totalLinks++;
-            let statusClass = "status-normal";
-            let extraInfo = "";
+        function generateStars() {
+          // 根据屏幕面积动态调整星星数量（密度恒定）
+          const area = width * height;
+          const count = Math.floor(area / 6000);
+          stars = [];
+          for (let i = 0; i < count; i++) {
+            stars.push({
+              x: Math.random() * width,
+              y: Math.random() * height,
+              r: Math.random() * 1.2 + 0.3,
+              baseAlpha: Math.random() * 0.6 + 0.2,
+              twinkleSpeed: Math.random() * 0.02 + 0.005,
+              twinklePhase: Math.random() * Math.PI * 2,
+              depth: Math.random() * 0.5 + 0.5, // 用于视差
+            });
+          }
+        }
+
+        function render(time) {
+          ctx.clearRect(0, 0, width, height);
+          // 视差偏移（鼠标移动时）
+          const parallaxX = (mouseX - width / 2) * 0.02;
+          const parallaxY = (mouseY - height / 2) * 0.02;
+
+          for (const star of stars) {
+            const twinkle =
+              Math.sin(time * star.twinkleSpeed + star.twinklePhase) * 0.4 + 0.6;
+            const alpha = star.baseAlpha * twinkle;
+            const x = star.x + parallaxX * star.depth;
+            const y = star.y + parallaxY * star.depth;
+
+            // 主体星星
+            ctx.beginPath();
+            ctx.arc(x, y, star.r, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+            ctx.fill();
+
+            // 亮星加光晕
+            if (star.r > 1) {
+              ctx.beginPath();
+              ctx.arc(x, y, star.r * 3, 0, Math.PI * 2);
+              ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.15})`;
+              ctx.fill();
+            }
+          }
+
+          animFrameId = requestAnimationFrame(render);
+        }
+
+        // 流星
+        function spawnShootingStar() {
+          // 仅在暗黑主题生成
+          if (document.body.dataset.theme !== "dark") {
+            setTimeout(spawnShootingStar, 5000);
+            return;
+          }
+
+          const star = document.createElement("div");
+          star.className = "shooting-star";
+          star.style.top = Math.random() * 50 + "%";
+          star.style.left = Math.random() * 50 + "%";
+          document.body.appendChild(star);
+
+          setTimeout(() => star.remove(), 1500);
+
+          // 下一颗：3-12 秒后
+          setTimeout(spawnShootingStar, 3000 + Math.random() * 9000);
+        }
+
+        // 事件监听
+        window.addEventListener("resize", resize);
+        window.addEventListener("mousemove", (e) => {
+          mouseX = e.clientX;
+          mouseY = e.clientY;
+        });
+
+        // 初始化
+        resize();
+        animFrameId = requestAnimationFrame(render);
+        setTimeout(spawnShootingStar, 2000);
+      })();
+
+      // ============================================
+      // 2. 主题切换
+      // ============================================
+      (function initTheme() {
+        const STORAGE_KEY = "flink-theme";
+        const body = document.body;
+        const btn = document.getElementById("theme-toggle");
+        const icon = btn.querySelector("i");
+
+        function applyTheme(theme) {
+          body.dataset.theme = theme;
+          icon.className = theme === "dark" ? "fa-solid fa-sun" : "fa-solid fa-moon";
+          btn.title = theme === "dark" ? "切换到白天" : "切换到星空";
+          // 同步 meta theme-color
+          const meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) {
+            meta.content = theme === "dark" ? "#0a0e27" : "#87ceeb";
+          }
+        }
+
+        // 初始化：localStorage > 系统偏好 > 默认 dark
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved === "light" || saved === "dark") {
+          applyTheme(saved);
+        } else if (
+          window.matchMedia &&
+          window.matchMedia("(prefers-color-scheme: light)").matches
+        ) {
+          applyTheme("light");
+        } else {
+          applyTheme("dark");
+        }
+
+        btn.addEventListener("click", () => {
+          const next = body.dataset.theme === "dark" ? "light" : "dark";
+          applyTheme(next);
+          localStorage.setItem(STORAGE_KEY, next);
+        });
+      })();
+
+      // ============================================
+      // 3. 视图切换
+      // ============================================
+      (function initView() {
+        const STORAGE_KEY = "flink-view";
+        const body = document.body;
+        const btn = document.getElementById("view-toggle");
+        const icon = btn.querySelector("i");
+        const listView = document.querySelector('[data-view-content="list"]');
+        const cardView = document.querySelector('[data-view-content="cards"]');
+
+        function applyView(view) {
+          body.dataset.view = view;
+          icon.className =
+            view === "list" ? "fa-solid fa-th-large" : "fa-solid fa-list";
+          btn.title = view === "list" ? "切换到卡片视图" : "切换到列表视图";
+          listView.hidden = view !== "list";
+          cardView.hidden = view !== "cards";
+        }
+
+        const saved = localStorage.getItem(STORAGE_KEY);
+        applyView(saved === "cards" ? "cards" : "list");
+
+        btn.addEventListener("click", () => {
+          const next = body.dataset.view === "list" ? "cards" : "list";
+          applyView(next);
+          localStorage.setItem(STORAGE_KEY, next);
+          // 首次切到卡片视图时，确保已渲染
+          if (next === "cards" && !cardView.dataset.rendered) {
+            renderCardView(window.__flinkData);
+            cardView.dataset.rendered = "1";
+          }
+        });
+      })();
+
+      // ============================================
+      // 4. 工具函数
+      // ============================================
+      function getHost(url) {
+        try {
+          return new URL(url).hostname.replace(/^www\./, "");
+        } catch {
+          return url;
+        }
+      }
+
+      function statusClass(latency) {
+        if (latency === -1) return "status-error";
+        if (latency > 4) return "status-slow";
+        return "status-normal";
+      }
+
+      function statusLabel(latency) {
+        if (latency === -1) return "超时";
+        if (latency < 1) return Math.round(latency * 1000) + " MS";
+        if (latency < 10) return latency.toFixed(2) + " s";
+        return Math.round(latency) + " s";
+      }
+
+      function escapeHtml(s) {
+        return String(s || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      // ============================================
+      // 5. 渲染列表视图
+      // ============================================
+      function renderListView(data) {
+        const errorList = document.getElementById("error-list");
+        const otherList = document.getElementById("other-list");
+        const errorCount = document.getElementById("error-count");
+        const otherCount = document.getElementById("other-count");
+
+        const errorLinks = data.link_status.filter((l) => l.latency === -1);
+        const otherLinks = data.link_status.filter((l) => l.latency !== -1);
+
+        errorCount.textContent = errorLinks.length;
+        otherCount.textContent = otherLinks.length;
+
+        const renderItem = (link) => {
+          const cls = statusClass(link.latency);
+          const label = statusLabel(link.latency);
+          const isError = link.latency === -1;
+
+          let backlinkIcon = "";
+          if (link.linkpage && link.linkpage.trim() !== "") {
+            const icon = link.has_author_link
+              ? "fa-heart-circle-check backlink-true"
+              : "fa-heart-circle-xmark backlink-false";
+            const title = link.has_author_link ? "友链页面有反链" : "友链页面无反链";
+            backlinkIcon = `<a href="${escapeHtml(
+              link.linkpage
+            )}" target="_blank" rel="noopener noreferrer" class="backlink-icon ${icon.startsWith(
+              "fa-heart-circle-check"
+            ) ? "backlink-true" : "backlink-false"}" title="${title}">
+              <i class="fa-solid ${icon}"></i>
+            </a>`;
+          }
+
+          return `
+            <div class="link-item ${isError ? "is-error" : ""}" style="animation-delay: ${Math.random() * 0.3}s">
+              <a class="link-name" href="${escapeHtml(link.link)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(link.name)}">
+                ${escapeHtml(link.name)}
+              </a>
+              <div class="link-meta">
+                ${isError ? `<span class="fail-count">×${link.fail_count || 0}</span>` : `<span>${label}</span>`}
+                ${backlinkIcon}
+                <span class="status-dot ${cls}" title="${label}"></span>
+              </div>
+            </div>
+          `;
+        };
+
+        errorList.innerHTML =
+          errorLinks.length > 0
+            ? errorLinks.map(renderItem).join("")
+            : '<div class="loading" style="padding: 20px"><i class="fa-solid fa-check"></i>暂无失效友链</div>';
+
+        otherList.innerHTML = otherLinks.map(renderItem).join("");
+      }
+
+      // ============================================
+      // 6. 渲染卡片视图
+      // ============================================
+      function renderCardView(data) {
+        const grid = document.getElementById("card-grid");
+        if (!data || !data.link_status || data.link_status.length === 0) {
+          grid.innerHTML =
+            '<div class="loading"><i class="fa-solid fa-circle-info"></i>暂无数据</div>';
+          return;
+        }
+
+        grid.innerHTML = data.link_status
+          .map((link, i) => {
+            const isError = link.latency === -1;
+            const cls = statusClass(link.latency);
+            const label = statusLabel(link.latency);
+            const host = getHost(link.link);
+            const avatarUrl = `https://www.google.com/s2/favicons?domain=${host}&sz=64`;
+
+            // 背景图：仅在有 siteshot 且非错误时使用
+            const bgStyle =
+              !isError && link.siteshot
+                ? `background-image: url('${escapeHtml(link.siteshot)}');`
+                : "";
+
             let backlinkIcon = "";
-
-            // --- 修改点 1: 增加对 linkpage 是否为空字符串的检查 ---
-            // 处理反链状态
-            if (link.linkpage && link.linkpage.trim() !== '' && link.has_author_link !== undefined) {
-              if (link.has_author_link) {
-                backlinkIcon = `<a href="${link.linkpage}" target="_blank" rel="noopener noreferrer" class="backlink-status" title="查看友链页面">
-                                  <i class="fa-solid fa-heart-circle-check backlink-icon backlink-true"></i>
-                                </a>`;
-                backlinkCount++;
-              } else {
-                backlinkIcon = `<a href="${link.linkpage}" target="_blank" rel="noopener noreferrer" class="backlink-status" title="查看友链页面">
-                                  <i class="fa-solid fa-heart-circle-xmark backlink-icon backlink-false"></i>
-                                </a>`;
-              }
+            if (link.linkpage && link.linkpage.trim() !== "") {
+              const icon = link.has_author_link
+                ? "fa-heart-circle-check backlink-true"
+                : "fa-heart-circle-xmark backlink-false";
+              const title = link.has_author_link ? "友链页面有反链" : "友链页面无反链";
+              backlinkIcon = `<a href="${escapeHtml(
+                link.linkpage
+              )}" target="_blank" rel="noopener noreferrer" class="backlink-icon ${link.has_author_link ? "backlink-true" : "backlink-false"}" title="${title}" onclick="event.stopPropagation()">
+                <i class="fa-solid ${icon}"></i>
+              </a>`;
             }
 
-            if (link.latency === -1) {
-              statusClass = "status-error";
-              errorLinks++;
-              extraInfo = `<span class="fail_counts">已持续${link.fail_count}次</span>`;
-              // --- 修改点 2: 调整图标顺序 ---
-              errorLinksHTML += `<div class="status-card">
-                            <a class="status-link" href="${link.link}" target="_blank" rel="noopener noreferrer noreferrer">${link.name}</a>
-                            <div class="status-indicators">
-                                ${extraInfo}
-                                ${backlinkIcon}
-                                <span class="status-dot ${statusClass}"></span>
-                            </div>
-                        </div>`;
-            } else if (link.latency > 4) {
-              statusClass = "status-slow";
-              slowLinks++;
-              // --- 修改点 2: 调整图标顺序 ---
-              otherLinksHTML += `<div class="status-card">
-                        <a class="status-link" href="${link.link}" target="_blank" rel="noopener noreferrer noreferrer">${link.name}</a>
-                        <div class="status-indicators">
-                            ${backlinkIcon}
-                            <span class="status-dot ${statusClass}"></span>
-                        </div>
-                    </div>`;
-            } else {
-              normalLinks++;
-              // --- 修改点 2: 调整图标顺序 ---
-              otherLinksHTML += `<div class="status-card">
-                        <a class="status-link" href="${link.link}" target="_blank" rel="noopener noreferrer noreferrer">${link.name}</a>
-                        <div class="status-indicators">
-                            ${backlinkIcon}
-                            <span class="status-dot ${statusClass}"></span>
-                        </div>
-                    </div>`;
+            if (isError) {
+              // 错误友链：简化卡片（无背景图）
+              return `
+              <div class="friend-card is-error" style="animation-delay: ${(i % 10) * 0.05}s">
+                <div class="card-content">
+                  <div class="card-header">
+                    <img class="card-avatar" src="${avatarUrl}" alt="" loading="lazy" onerror="this.style.opacity='0.3'">
+                    <div class="card-title-area">
+                      <h3 class="card-name">${escapeHtml(link.name)}</h3>
+                      <div class="card-host">${escapeHtml(host)}</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="link-meta">
+                  <span class="fail-count">×${link.fail_count || 0}</span>
+                  ${backlinkIcon}
+                  <span class="status-dot ${cls}" title="${label}"></span>
+                </div>
+              </div>
+            `;
             }
-          });
 
-          if (errorLinksHTML) {
-            container_error.innerHTML = errorLinksHTML;
-          } else {
-            // 如果没有错误链接，移除标题和分割线自身（而不是它们的父级）
-            const errorTitle = document.querySelector(".error-link-h2");
-            const errorHr = document.querySelector(".error-link-hr");
-            if (errorTitle) errorTitle.remove();
-            if (errorHr) errorHr.remove();
-          }
+            // 正常友链：富卡片
+            return `
+              <a class="friend-card" href="${escapeHtml(link.link)}" target="_blank" rel="noopener noreferrer" style="animation-delay: ${(i % 10) * 0.05}s">
+                <div class="card-bg" style="${bgStyle}"></div>
+                <div class="card-overlay"></div>
+                <div class="card-content">
+                  <div class="card-header">
+                    <img class="card-avatar" src="${avatarUrl}" alt="" loading="lazy" onerror="this.style.opacity='0.3'">
+                    <div class="card-title-area">
+                      <h3 class="card-name">${escapeHtml(link.name)}</h3>
+                      <div class="card-host">${escapeHtml(host)}</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="card-footer">
+                  <span class="card-latency ${isError ? "timeout" : ""}">${label}</span>
+                  <div class="card-actions">
+                    ${backlinkIcon}
+                    <span class="status-dot ${cls}" title="${label}"></span>
+                  </div>
+                </div>
+              </a>
+            `;
+          })
+          .join("");
+      }
 
-          if (otherLinksHTML) {
-            container_other.innerHTML = otherLinksHTML;
-          }
+      // ============================================
+      // 7. 主流程：加载数据并渲染
+      // ============================================
+      async function loadData() {
+        try {
+          const res = await fetch("/result.json", { cache: "no-cache" });
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          const data = await res.json();
+          window.__flinkData = data;
 
-          // 更新统计数据
-          document.getElementById("total-links").textContent = totalLinks;
-          document.getElementById("normal-links").textContent = normalLinks;
-          // document.getElementById("slow-links").textContent = slowLinks;
-          document.getElementById("error-links").textContent = errorLinks;
-          document.getElementById("backlink-count").textContent = backlinkCount;
-        })
-        .catch((error) => console.error("Error loading status:", error));
+          // 更新时间
+          document.getElementById("update-time").textContent =
+            data.timestamp || "--";
+
+          // 统计卡
+          document.getElementById("total-links").textContent =
+            data.total_count ?? data.link_status.length;
+          document.getElementById("normal-links").textContent =
+            data.accessible_count ??
+            data.link_status.filter((l) => l.latency !== -1).length;
+          document.getElementById("error-links").textContent =
+            data.inaccessible_count ??
+            data.link_status.filter((l) => l.latency === -1).length;
+          document.getElementById("backlink-count").textContent =
+            data.has_author_link_count ??
+            data.link_status.filter((l) => l.has_author_link).length;
+
+          // 渲染两种视图
+          renderListView(data);
+          renderCardView(data);
+          document
+            .querySelector('[data-view-content="cards"]')
+            .setAttribute("data-rendered", "1");
+        } catch (err) {
+          console.error("加载 result.json 失败:", err);
+          document.getElementById("error-list").innerHTML =
+            '<div class="loading" style="color: var(--accent-red)"><i class="fa-solid fa-triangle-exclamation"></i>加载失败，请稍后重试</div>';
+          document.getElementById("update-time").textContent = "加载失败";
+        }
+      }
+
+      // ============================================
+      // 8. 启动
+      // ============================================
+      document.getElementById("year").textContent = new Date().getFullYear();
+      loadData();
     </script>
   </body>
 </html>

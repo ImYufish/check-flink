@@ -16,3 +16,7 @@ __pycache__/
 # 诊断日志（不提交，临时文件）
 run_log.txt
 *.log
+
+# Trae/Cursor IDE 临时文件
+.trae/
+.cursor/

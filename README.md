@@ -6,7 +6,7 @@
 
 自动检测博客友链可达性 + 自动截取友链主页，一站式部署。
 
-![示例](https://raw.githubusercontent.com/willow-god/check-flink/main/static/pic-doc/show.png)
+![示例](https://raw.githubusercontent.com/fqzlr/check-flink/main/static/pic-doc/show.png)
 
 ---
 
@@ -78,7 +78,7 @@
 'siteshot': prev_entry.get('siteshot', ''),  # 保留历史截图，由 screenshot_runner 更新
 ```
 
-#### ➕ `screenshot.py`（**新增 186 行**）
+#### ➕ `screenshot.py`（**新增 207 行**）
 
 完整截图模块，**移植自 thun888**，但做了以下适配：
 
@@ -89,7 +89,7 @@
 | 失败回退 | 直接失败 | **Selenium 失败 → thum.io**；**上传失败 → thum.io** |
 | 触发方式 | 独立 cron | **从 `result.json` 读取已检测的友链**，只对 `latency > 0` 的友链截图 |
 
-#### ➕ `screenshot_runner.py`（**新增 93 行**）
+#### ➕ `screenshot_runner.py`（**新增 86 行**）
 
 独立入口，**解耦截图与状态检测**，支持 `TARGET_LINK` 过滤（只截指定友链）：
 
@@ -101,7 +101,7 @@ take_screenshots job (6 天) ┘
 TARGET_LINK="某友链" → 只检测/截图该友链，其余保留上次结果
 ```
 
-#### ➕ `inject.css`（**新增 31 行**）
+#### ➕ `inject.css`（**新增 26 行**）
 
 截图时注入到目标页面，**移植自 thun888**：
 
@@ -164,7 +164,7 @@ check-flink/
 ├── inject.css                     # 截图时注入的 CSS
 ├── requirements.txt               # 依赖（含 selenium）
 ├── .env.example                   # 环境变量示例
-├── link.example.csv               # CSV 数据源示例
+├── link.csv                        # CSV 数据源（友链配置）
 ├── static/
 │   ├── index.html                 # 原作者自带的结果展示页
 │   ├── result.json                # 自动生成：状态 + 截图统一数据
@@ -192,7 +192,7 @@ check-flink/
 
 ### Step 1 · Fork 仓库
 
-1. 访问 [github.com/willow-god/check-flink](https://github.com/willow-god/check-flink)
+1. 访问 [github.com/fqzlr/check-flink](https://github.com/fqzlr/check-flink)
 2. 点击右上角 **Fork** 按钮
 3. 仓库名可自定义（如 `check-flink`、`friend-monitor`）
 4. ⚠️ **不要勾选** "Copy the main branch only"，因为我们要用 `page` 分支托管
@@ -200,7 +200,7 @@ check-flink/
 或者用命令行：
 
 ```bash
-git clone https://github.com/willow-god/check-flink.git
+git clone https://github.com/fqzlr/check-flink.git
 cd check-flink
 git remote set-url origin https://github.com/<你的用户名>/<仓库名>.git
 git push -u origin main
@@ -258,44 +258,102 @@ Add secret
 在博客侧新增一个 Astro 端点（如 `src/pages/friends.json.ts`）：
 
 ```ts
-import { friendsConfig } from "@/config/friendsConfig";
 import type { APIRoute } from "astro";
+import { getEnabledFriends } from "@/config/friendsConfig";
 
-export const GET: APIRoute = async () => {
-  const enabled = friendsConfig.filter(f => f.enabled !== false);
+/**
+ * 友链数据 JSON 端点
+ * 供 check-flink 仓库读取，自动维护友链列表
+ *
+ * 访问地址：https://fqzlr.com/friends.json
+ * 输出格式：与 check-flink 兼容的标准 JSON
+ */
+export const GET: APIRoute = () => {
+  const friends = getEnabledFriends();
+  const linkList = friends.map((f) => ({
+    name: f.title,
+    link: f.siteurl.trim(),         // 去首尾空格，避免匹配失败
+    avatar: f.imgurl,
+    descr: f.desc,
+    siteshot: "",                   // 留空，由 check-flink 填充
+    linkpage: f.linkpage?.trim() || "",  // 可选：友链页面 URL，用于反链检测
+  }));
+
   return new Response(
     JSON.stringify({
-      link_list: enabled.map(f => ({
-        name: f.title,
-        link: f.siteurl,
-        avatar: f.imgurl,
-        descr: f.desc,
-        siteshot: "",  // 留空，由 check-flink 填充
-        linkpage: f.linkpage || "",  // 可选：友链页面 URL，用于反链检测
-      })),
-      length: enabled.length,
+      link_list: linkList,
+      length: linkList.length,
     }),
     {
-      headers: { "Content-Type": "application/json" },
-    }
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        // 5 分钟缓存（浏览器 + CDN），check-flink 每 12 小时跑一次，远小于此间隔
+        "Cache-Control": "public, max-age=300, s-maxage=300",
+      },
+    },
   );
 };
 ```
+
+> 💡 建议把"过滤友链"的逻辑封装在 `friendsConfig.ts` 的 `getEnabledFriends()` 中，端点只负责序列化。这样以后筛选规则（如按 tag、weight、排序）变化时不用动这个文件。
 
 部署后访问 `https://你的博客.com/friends.json`，应返回上述结构。
 
 #### 方案 B：CSV 文件（简单）
 
-在仓库根目录创建 `link.csv`：
+在仓库根目录创建 `link.csv`（完整友链配置）：
 
 ```csv
-清羽飞扬,https://blog.liushen.fun/,https://blog.liushen.fun/link/
-ChrisKim,https://www.zouht.com/,https://www.zouht.com/link-exchange
-Akilar,https://akilar.top/,https://akilar.top/link/
-张洪Heo,https://blog.zhheo.com/,https://blog.zhheo.com/link/
+番茄主理人,https://fqzlr.com/
+MmzMing的知识库,https://tblog.mmzhiku.xyz/
+团子和蛋糕,https://blog.tsh520.cn/
+Olinl Blog,https://blog.olinl.com/
+夏夜流萤,https://blog.cuteleaf.cn/
+椰汁の主页,https://home.132614.xyz/
+UpXuu,https://upxuu.com/
+Re.Y.Ju.hao | 个人主页,http://irehao.42web.io/
+大熊,https://halo.aizaibao.cn/
+xf_blog,https://xfcnl.github.io/
+年华,https://blog.520781.xyz/
+yukino,https://blog.ztyukino.com/
+king-blog,https://www.888721.xyz/
+冬月,https://dongyue.org/
+Mizuki Docs,https://docs.mizuki.mysqil.com/
+ZSSO,https://www.zsso.net/
+versus0,https://blog.542000.xyz/
+星遐蝶梦,https://blog.casto.top/
+晴宙,https://qingzhou.dpdns.org/
+Saimen blog,https://com.z2m.store/
+miuo,https://miuo.me/
+my.vueko,https://vuekoo.com/
+YFBLOG - 幻新至简,https://yfblog.asia/
+十三,https://blog.nw177.cn/
+ZhiJing's Blog,https://iwexe.top/
+Sigrika-善良耙耙柑🍊,https://qwq.sigrika.cc/
+L!!!!ght,https://sunlight.kejk.cn/
+拾光の博客,https://mistfly.xyz/
+冰汐梦,https://blog.irier0023.xyz/
+ysdy~Blog,https://ysdyblog.ccwu.cc/
+风起,https://blog.windstart.top/
+小生,https://www.zsso.cn/
+Hyde Blog,https://seasir.top/
+gc的小站,https://gcweb.cc/
+他说,https://090909.top/
+RAGNote,https://ragnote.top/
+深渊园丁,https://www.minedensity.top/
+落樱大王の小窝,https://acblog.sakurafishermua.top/
+xane,https://xane.eu.cc/
+JerryLife,https://jerry-nis.top/
+Yukihime,https://yukihime.dev/
+旧梦与花,https://zhh2001.github.io/
+Zero-浮生,https://vtdd.vip/
+萧小晓,https://blog.lxlovo.top/
+Aimerting,https://blog.xuioo.com/
+笔尖代码,https://123456l.com/
+Pasule,https://pasule.com/
 ```
 
-格式：`name,link,linkpage`
+格式：`name,link`（如需反链检测，可补 `linkpage` 字段：`name,link,linkpage`）
 
 然后设置 Secret：
 ```
@@ -509,58 +567,6 @@ Level 3：（本项目未实现，但可扩展）
 ```
 
 ---
-
-## 🎯 触发方式详解
-
-### 自动触发（定时）
-
-| cron 表达式 | 执行内容 | 说明 |
-|-------------|----------|------|
-| `0 1 * * *` | 仅状态检测 | 每天 01:00 |
-| `0 13 * * *` | 仅状态检测 | 每天 13:00 |
-| `30 1 1,7,13,19,25 * *` | 状态检测 + 截图 | 每 6 天（1/7/13/19/25 号 01:30） |
-
-> 截图 job 通过 `github.event.schedule` 判断是否为截图 cron，避免每天跑重型 Selenium
-
-### 手动触发（workflow_dispatch）
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `task` | choice | `status_only`（默认）/ `screenshots_only` / `both` |
-| `target_link` | string | 只处理指定友链（名称或 URL 关键词），留空 = 全部 |
-
-**组合示例**：
-
-| 场景 | task | target_link |
-|------|------|-------------|
-| 日常巡检 | `status_only` | 留空 |
-| 新增友链后只检测它 | `status_only` | `番茄` |
-| 新增友链后检测+截图 | `both` | `blog.example.com` |
-| 重新截全部友链 | `screenshots_only` | 留空 |
-| 全量检测+截图 | `both` | 留空 |
-
-### Job 触发条件
-
-```yaml
-check_links:
-  # 除「手动选仅截图」外，其余情况都执行状态检测
-  if: ${{ github.event_name != 'workflow_dispatch' || inputs.task != 'screenshots_only' }}
-
-take_screenshots:
-  # 只有「6天定时」或「手动选了截图/全部」才执行
-  if: ${{ (github.event_name == 'schedule' && github.event.schedule == '30 1 1,7,13,19,25 * *')
-       || (github.event_name == 'workflow_dispatch' && (inputs.task == 'screenshots_only' || inputs.task == 'both')) }}
-```
-
-### TARGET_LINK 增量处理
-
-当 `target_link` 非空时：
-
-1. **状态检测**（main.py）：只请求匹配的友链，其余从上次 `result.json` 保留，按数据源顺序合并
-2. **截图**（screenshot_runner.py）：只对匹配且可达的友链截图，其余保留已有截图 URL
-3. **total_count 不变**：不会因只跑一个友链就丢失其他友链数据
-
-> 💡 匹配规则：友链名称或 URL 包含 target_link 字符串（子串匹配）
 
 ## 🎯 触发方式详解
 
@@ -826,7 +832,7 @@ python screenshot.py https://blog.liushen.fun/ blog.liushen.fun
 
 ## 📄 License
 
-继承原项目 License：[MIT](https://github.com/willow-god/check-flink/blob/main/LICENSE)
+继承原项目 License：[MIT](https://github.com/fqzlr/check-flink/blob/main/LICENSE)
 
 ---
 
