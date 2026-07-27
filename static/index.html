@@ -772,13 +772,12 @@
         background-size: cover;
         background-position: center top;
         background-repeat: no-repeat;
-        opacity: 0.4;
+        opacity: 1;
         z-index: 0;
-        transition: opacity 0.4s ease, transform 0.6s ease;
+        transition: transform 0.6s ease;
       }
 
       .friend-card:hover .card-bg {
-        opacity: 0.55;
         transform: scale(1.05);
       }
 
@@ -788,21 +787,25 @@
         left: 0;
         width: 100%;
         height: 100%;
+        /* 仅在文字区域底部加轻微深色蒙版（保证文字可读，不影响整体背景图清晰度） */
         background: linear-gradient(
           180deg,
-          rgba(10, 14, 39, 0.4) 0%,
-          rgba(10, 14, 39, 0.85) 60%,
-          rgba(10, 14, 39, 0.95) 100%
+          rgba(10, 14, 39, 0) 0%,
+          rgba(10, 14, 39, 0) 30%,
+          rgba(10, 14, 39, 0.4) 70%,
+          rgba(10, 14, 39, 0.7) 100%
         );
         z-index: 1;
+        pointer-events: none;
       }
 
       [data-theme="light"] .card-overlay {
         background: linear-gradient(
           180deg,
-          rgba(255, 255, 255, 0.2) 0%,
-          rgba(255, 255, 255, 0.7) 60%,
-          rgba(255, 255, 255, 0.95) 100%
+          rgba(255, 255, 255, 0) 0%,
+          rgba(255, 255, 255, 0) 30%,
+          rgba(255, 255, 255, 0.3) 70%,
+          rgba(255, 255, 255, 0.6) 100%
         );
       }
 
@@ -847,11 +850,13 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+        text-shadow:
+          0 1px 3px rgba(0, 0, 0, 0.8),
+          0 0 8px rgba(0, 0, 0, 0.4);
       }
 
       [data-theme="light"] .card-name {
-        text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
+        text-shadow: 0 1px 4px rgba(255, 255, 255, 0.9);
       }
 
       .card-host {
@@ -859,10 +864,12 @@
         font-size: 0.8rem;
         font-family:
           ui-monospace, "SF Mono", Menlo, Monaco, "Cascadia Code", monospace;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
       }
 
       [data-theme="light"] .card-host {
         color: var(--text-secondary);
+        text-shadow: 0 1px 3px rgba(255, 255, 255, 0.9);
       }
 
       .card-footer {
@@ -874,20 +881,25 @@
         justify-content: space-between;
         align-items: center;
         gap: 8px;
-        background: rgba(0, 0, 0, 0.2);
+        background: rgba(10, 14, 39, 0.7);
         backdrop-filter: blur(10px);
         -webkit-backdrop-filter: blur(10px);
       }
 
       [data-theme="light"] .card-footer {
-        background: rgba(255, 255, 255, 0.4);
+        background: rgba(255, 255, 255, 0.75);
       }
 
       .card-latency {
         font-size: 0.85rem;
-        color: var(--text-secondary);
+        color: var(--text-primary);
         font-weight: 600;
         font-variant-numeric: tabular-nums;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+      }
+
+      [data-theme="light"] .card-latency {
+        text-shadow: none;
       }
 
       .card-latency.timeout {
