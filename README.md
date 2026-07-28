@@ -770,9 +770,47 @@ webdriver-manager==4.0.2
 
 **增量合并机制**：只有匹配的友链会被重新检测/截图，其余友链保留上次结果，`total_count` 不会减少。
 
-### Q8: 图床出现 `xxx.com(5).png` 这种带后缀的旧文件，怎么清理？
+### Q9: 博客友链卡片背景截图不显示？全部 siteshot 为空？
 
-**A**: 项目已自动调用 cfbed 删除 API 在每次上传前清理同名旧图：
+**A**: 这是 2026-07-29 修复的两个独立 bug，请确认 workflow 文件已更新到最新版本：
+
+**Bug 1：`take_screenshots` job 工作区污染**（已修复 `e28ea86`）
+
+- **现象**：截图 job 跑了但 result.json 中 siteshot 全空
+- **根因**：schedule 触发时 `actions/checkout@v4` 默认拉 `main` 分支（不含 `result.json`），download-artifact 失败时 `if-no-result-found: warn` 不报错，空跑截图
+- **修复**：
+  ```yaml
+  - uses: actions/checkout@v4
+    with:
+      ref: page   # 显式拉 page 分支（含 result.json）
+  ```
+  `download-artifact` 的 `if-no-result-found` 改为 `error`（拿不到就 fail，暴露问题）
+
+**Bug 2：`check_links` job 每天覆盖掉截图数据**（已修复 `960f198`）
+
+- **现象**：截图 job 跑完后 siteshot 明明有，过一天又全空了
+- **根因**：`check_links` 每天下载 `result_json` artifact（来自上次 `check_links` job，不含 siteshot），然后 push 到 `page` 分支 → 把 6 天前截图 job 写的 siteshot 全部覆盖成空
+- **数据流轨迹**：
+  ```
+  Day 1: take_screenshots → page 分支有 siteshot ✔
+  Day 2: check_links → 下载 result_json（无 siteshot）→ push page → siteshot 全丢 ✗
+  Day 3-7: 同上，page 分支永远没有 siteshot
+  ```
+- **修复**：`check_links` 改用 `curl` 从 `page` 分支拉取最新 `result.json`（含 siteshot），替代原来的 `dawidd6/action-download-artifact@v6`（下载的是不含 siteshot 的 artifact）
+  ```yaml
+  - name: Download result.json from page branch
+    run: |
+      curl -sL -o ./result.json \
+        "https://raw.githubusercontent.com/${{ github.repository }}/page/static/result.json"
+  ```
+
+**新增调试工具**：`check_siteshot.py` — 检查 result.json 中 siteshot 字段状态，在 workflow 各关键步骤自动调用，方便排查问题。
+
+**验证方法**：手动触发一次 workflow（task=both, target_link 留空），观察日志中 `check_siteshot.py` 的输出：
+- `Download result.json from page branch` 步骤：应显示上次截图 job 写入的 siteshot 统计
+- `Commit and push (with siteshot)` 步骤：应显示 `空=0`（全部友链都有截图 URL）
+
+### Q8: 图床出现 `xxx.com(5).png` 这种带后缀的旧文件，怎么清理？
 
 - **删除端点**：`GET {base_url}/api/manage/delete/{folder}/{filename}`
 - **认证**：`Authorization: Bearer {IMG_AUTH_CODE}`（与上传共用一个 Token）
