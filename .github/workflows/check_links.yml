@@ -1,4 +1,4 @@
-﻿name: Check Links and Generate JSON
+name: Check Links and Generate JSON
 
 on:
   schedule:
@@ -115,6 +115,10 @@ jobs:
     steps:
     - name: Pull latest repository
       uses: actions/checkout@v4
+      with:
+        # 关键：显式 checkout page 分支，否则 schedule 触发时默认 checkout main 分支，
+        # main 分支不含 result.json，会污染 take_screenshots job 的工作区
+        ref: page
 
     - name: Cache pip packages
       uses: actions/cache@v4
@@ -149,7 +153,8 @@ jobs:
       with:
         name: 'result_json'
         path: './'
-        if-no-result-found: warn
+        # 改为 error：拿不到 result.json 直接让 job 失败，暴露问题
+        if-no-result-found: error
 
     - name: Run screenshot
       env:
@@ -159,6 +164,20 @@ jobs:
         SCREENSHOT_WORKERS: '2'
         TARGET_LINK: ${{ inputs.target_link }}
       run: |
+        # ===== 调试：确认 result.json 状态 =====
+        echo "==== result.json 状态 ===="
+        if [ -f ./result.json ]; then
+          echo "✅ result.json 存在"
+          echo "📦 大小: $(stat -c%s ./result.json) bytes"
+          echo "📋 link_status[0].siteshot 字段："
+          python -c "import json; d=json.load(open('./result.json')); s=d.get('link_status',[]); print(s[0].get('siteshot','<MISSING>') if s else '<EMPTY>')"
+          echo "📊 全部 siteshot 字段统计："
+          python -c "import json; d=json.load(open('./result.json')); s=d.get('link_status',[]); empty=sum(1 for x in s if not x.get('siteshot')); print(f'  共 {len(s)} 条，空 siteshot {empty} 条')"
+        else
+          echo "❌ result.json 不存在（download-artifact 失败）"
+        fi
+        echo "==========================="
+
         echo "IMG_UPLOAD_URL: $IMG_UPLOAD_URL"
         echo "TARGET_LINK: $TARGET_LINK"
         python screenshot_runner.py
@@ -177,6 +196,20 @@ jobs:
 
     - name: Commit and push (with siteshot)
       run: |
+        # ===== 调试：确认要推送的 result.json 状态 =====
+        echo "==== 推送前 result.json 状态 ===="
+        if [ -f ./result.json ]; then
+          echo "📦 result.json 大小: $(stat -c%s ./result.json) bytes"
+          echo "📊 siteshot 统计："
+          python -c "import json; d=json.load(open('./result.json')); s=d.get('link_status',[]); empty=sum(1 for x in s if not x.get('siteshot')); thumio=sum(1 for x in s if 'thum.io' in (x.get('siteshot') or '')); real=len(s)-empty-thumio; print(f'  共 {len(s)} 条：空={empty} | thum.io={thumio} | 真图床={real}')"
+          echo "📋 前 3 条 siteshot 预览："
+          python -c "import json; d=json.load(open('./result.json')); [print(f'  - {x.get(\"name\",\"?\")}: {x.get(\"siteshot\",\"<空>\")[:90]}') for x in d.get('link_status',[])[:3]]"
+        else
+          echo "❌ result.json 不存在，无法推送"
+          exit 1
+        fi
+        echo "================================"
+
         cp ./result.json static/
         cd static
         git init
