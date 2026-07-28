@@ -1,4 +1,4 @@
-name: Check Links and Generate JSON
+﻿name: Check Links and Generate JSON
 
 on:
   schedule:
@@ -128,10 +128,9 @@ jobs:
     steps:
     - name: Pull latest repository
       uses: actions/checkout@v4
-      with:
-        # 关键：显式 checkout page 分支，否则 schedule 触发时默认 checkout main 分支，
-        # main 分支不含 result.json，会污染 take_screenshots job 的工作区
-        ref: page
+      # 注意：必须用默认分支（main），不能 ref: page
+      # page 分支只含静态文件（result.json/index.html 等），没有 requirements.txt 和 Python 脚本
+      # 这里的 result.json 由下方 download-artifact 步骤从 check_links job 拿，不依赖 checkout
 
     - name: Cache pip packages
       uses: actions/cache@v4
