@@ -55,14 +55,18 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Download result.json artifact
-      uses: dawidd6/action-download-artifact@v6
-      with:
-        github_token: ${{secrets.GITHUB_TOKEN}}
-        branch: main
-        name: 'result_json'
-        path: './'
-        if_no_artifact_found: warn
+    - name: Download result.json from page branch
+      run: |
+        echo "从 page 分支拉取最新 result.json（含历史截图 URL）..."
+        HTTP_CODE=$(curl -sL -w "%{http_code}" -o ./result.json \
+          "https://raw.githubusercontent.com/${{ github.repository }}/page/static/result.json")
+        if [ "$HTTP_CODE" != "200" ] || [ ! -s ./result.json ]; then
+          echo "⚠️ page 分支无 result.json（HTTP $HTTP_CODE），首次运行，创建空数据"
+          echo "{}" > ./result.json
+        else
+          echo "✅ 下载成功（$(stat -c%s ./result.json) bytes）"
+          python check_siteshot.py ./result.json
+        fi
 
     - name: Run Python script to check frined-links
       env:
@@ -93,6 +97,15 @@ jobs:
 
     - name: Commit and push
       run: |
+        echo "==== 推送前（check_links）result.json 状态 ===="
+        if [ -f ./result.json ]; then
+          echo "📦 result.json 大小: $(stat -c%s ./result.json) bytes"
+          python check_siteshot.py ./result.json
+        else
+          echo "❌ result.json 不存在"
+        fi
+        echo "================================================"
+
         cp ./result.json static/
         cd static
         git init
@@ -164,15 +177,11 @@ jobs:
         SCREENSHOT_WORKERS: '2'
         TARGET_LINK: ${{ inputs.target_link }}
       run: |
-        # ===== 调试：确认 result.json 状态 =====
         echo "==== result.json 状态 ===="
         if [ -f ./result.json ]; then
           echo "✅ result.json 存在"
           echo "📦 大小: $(stat -c%s ./result.json) bytes"
-          echo "📋 link_status[0].siteshot 字段："
-          python -c "import json; d=json.load(open('./result.json')); s=d.get('link_status',[]); print(s[0].get('siteshot','<MISSING>') if s else '<EMPTY>')"
-          echo "📊 全部 siteshot 字段统计："
-          python -c "import json; d=json.load(open('./result.json')); s=d.get('link_status',[]); empty=sum(1 for x in s if not x.get('siteshot')); print(f'  共 {len(s)} 条，空 siteshot {empty} 条')"
+          python check_siteshot.py ./result.json
         else
           echo "❌ result.json 不存在（download-artifact 失败）"
         fi
@@ -196,14 +205,10 @@ jobs:
 
     - name: Commit and push (with siteshot)
       run: |
-        # ===== 调试：确认要推送的 result.json 状态 =====
         echo "==== 推送前 result.json 状态 ===="
         if [ -f ./result.json ]; then
           echo "📦 result.json 大小: $(stat -c%s ./result.json) bytes"
-          echo "📊 siteshot 统计："
-          python -c "import json; d=json.load(open('./result.json')); s=d.get('link_status',[]); empty=sum(1 for x in s if not x.get('siteshot')); thumio=sum(1 for x in s if 'thum.io' in (x.get('siteshot') or '')); real=len(s)-empty-thumio; print(f'  共 {len(s)} 条：空={empty} | thum.io={thumio} | 真图床={real}')"
-          echo "📋 前 3 条 siteshot 预览："
-          python -c "import json; d=json.load(open('./result.json')); [print(f'  - {x.get(\"name\",\"?\")}: {x.get(\"siteshot\",\"<空>\")[:90]}') for x in d.get('link_status',[])[:3]]"
+          python check_siteshot.py ./result.json
         else
           echo "❌ result.json 不存在，无法推送"
           exit 1
