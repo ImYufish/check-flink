@@ -58,6 +58,13 @@ AUTHOR_URL = os.getenv("AUTHOR_URL", "blog.liushen.fun")  # 作者URL，用于�
 _RAW_TARGET = os.getenv("TARGET_LINK", "").strip()
 TARGET_LINK_LIST: list[str] = [p.strip() for p in _RAW_TARGET.split("|") if p.strip()]
 
+# 站点豁免：已知可正常访问但被 WAF/CDN 拦截（如 EdgeOne/Cloudflare）
+# 从 GitHub Actions（海外 IP）访问会被拦截，但国内用户可正常访问
+# 格式：规范化 host（去掉协议、www、末尾斜杠）
+FRIENDLY_GEO_HOSTS = {
+    "123456l.com",
+}
+
 api_request_queue = Queue()
 
 if PROXY_URL_TEMPLATE:
@@ -485,6 +492,15 @@ def main():
                     else:
                         prev_geo_streak = 0  # 非 geo → 清0 streak
                         fail_count = prev_fail_count + 1
+
+                # 站点豁免：已知可访问但被 WAF 拦截的站点，强制标记为 ok
+                if status != "ok" and _host_only(link) in FRIENDLY_GEO_HOSTS:
+                    logging.info(f"[豁免] {link} 在友好站点列表中，强制标记为 ok")
+                    status = "ok"
+                    geo_hint = None
+                    latency = 0
+                    fail_count = 0
+                    prev_geo_streak = 0
 
                 link_status.append({
                     'name': name,

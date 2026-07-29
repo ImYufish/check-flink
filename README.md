@@ -692,6 +692,22 @@ Secret: myfriends   # 截图会存到 tu.xxx.com/myfriends/
 
 > 🔍 检测逻辑：抓取友链页面（`linkpage`，留空回退首页），用正则提取所有真实 `<a href>` 链接并精确比对主机名（兼容 `www`、协议相对、带路径、大小写）；**仅纯文本出现域名不计为反链**，避免误报。
 
+### 7. 站点豁免（WAF/CDN 误拦截）
+
+部分友链站点部署了 **EdgeOne / Cloudflare WAF** 等安全防护，从 GitHub Actions（海外 IP）访问会被拦截，但国内用户可正常访问。可通过 `FRIENDLY_GEO_HOSTS` 豁免列表让这些站点强制标记为正常：
+
+编辑 `main.py`，在 `FRIENDLY_GEO_HOSTS` 集合中添加目标站点 host：
+
+```python
+# 格式：规范化 host（去掉协议、www、末尾斜杠）
+FRIENDLY_GEO_HOSTS = {
+    "123456l.com",   # 被 EdgeOne 拦截
+    # "example.com",  # 被 Cloudflare 拦截
+}
+```
+
+> ⚠️ 仅添加你确认**国内可正常访问**的站点。GitHub Actions 在海外执行，无法绕过 WAF 检测，此豁免是唯一可靠的解决方案。
+
 ---
 
 ## 🐛 常见问题
