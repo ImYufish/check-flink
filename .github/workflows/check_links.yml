@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿name: Check Links and Generate JSON
+name: Check Links and Generate JSON
 
 on:
   schedule:
