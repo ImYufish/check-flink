@@ -1,4 +1,4 @@
-name: Check Links and Generate JSON
+﻿﻿﻿﻿﻿﻿name: Check Links and Generate JSON
 
 on:
   schedule:
@@ -58,8 +58,14 @@ jobs:
     - name: Download result.json from page branch
       run: |
         echo "从 page 分支拉取最新 result.json（含历史截图 URL）..."
+        # 先试根目录（page 分支实际在根目录），失败回退到 static/ 子目录
         HTTP_CODE=$(curl -sL -w "%{http_code}" -o ./result.json \
-          "https://raw.githubusercontent.com/${{ github.repository }}/page/static/result.json")
+          "https://raw.githubusercontent.com/${{ github.repository }}/page/result.json")
+        if [ "$HTTP_CODE" != "200" ]; then
+          echo "⚠️ 根目录未找到（HTTP $HTTP_CODE），尝试 static/result.json..."
+          HTTP_CODE=$(curl -sL -w "%{http_code}" -o ./result.json \
+            "https://raw.githubusercontent.com/${{ github.repository }}/page/static/result.json")
+        fi
         if [ "$HTTP_CODE" != "200" ] || [ ! -s ./result.json ]; then
           echo "⚠️ page 分支无 result.json（HTTP $HTTP_CODE），首次运行，创建空数据"
           echo "{}" > ./result.json
@@ -186,7 +192,8 @@ jobs:
   take_screenshots:
     name: 截取友链主页截图
     runs-on: ubuntu-latest
-    needs: [check_links]
+    # 关键改动：删除 needs: [check_links]，让此 job 完全独立
+    # 数据从 page 分支 curl 拉取，不依赖 check_links 的 artifact
     # 仅在【每 6 天定时】或【手动选择 screenshots_only / both】时执行
     if: ${{ (github.event_name == 'schedule' && github.event.schedule == '30 1 1,7,13,19,25 * *') || (github.event_name == 'workflow_dispatch' && (inputs.task == 'screenshots_only' || inputs.task == 'both')) }}
     steps:
@@ -224,13 +231,23 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y fonts-wqy-microhei fonts-wqy-zenhei
 
-    - name: Download result.json artifact (from check_links)
-      uses: actions/download-artifact@v4
-      with:
-        name: 'result_json'
-        path: './'
-        # 改为 error：拿不到 result.json 直接让 job 失败，暴露问题
-        if-no-result-found: error
+    - name: Download result.json from page branch
+      run: |
+        echo "从 page 分支拉取最新 result.json（含状态 + 历史截图 URL）..."
+        # 先试根目录（page 分支实际在根目录），失败回退到 static/ 子目录
+        HTTP_CODE=$(curl -sL -w "%{http_code}" -o ./result.json \
+          "https://raw.githubusercontent.com/${{ github.repository }}/page/result.json")
+        if [ "$HTTP_CODE" != "200" ]; then
+          echo "⚠️ 根目录未找到（HTTP $HTTP_CODE），尝试 static/result.json..."
+          HTTP_CODE=$(curl -sL -w "%{http_code}" -o ./result.json \
+            "https://raw.githubusercontent.com/${{ github.repository }}/page/static/result.json")
+        fi
+        if [ "$HTTP_CODE" != "200" ] || [ ! -s ./result.json ]; then
+          echo "❌ page 分支无 result.json（HTTP $HTTP_CODE），截图 job 无法运行"
+          exit 1
+        fi
+        echo "✅ 下载成功（$(stat -c%s ./result.json) bytes）"
+        python check_siteshot.py ./result.json
 
     - name: Run screenshot
       env:
@@ -253,13 +270,6 @@ jobs:
         echo "IMG_UPLOAD_URL: $IMG_UPLOAD_URL"
         echo "TARGET_LINK: $TARGET_LINK"
         python screenshot_runner.py
-
-    - name: Upload updated result.json as artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: 'result_json_with_shot'
-        path: './result.json'
-        retention-days: 10
 
     - name: Configure git
       run: |
