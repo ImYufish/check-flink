@@ -1593,7 +1593,8 @@
       // ============================================
       async function loadData() {
         try {
-          const res = await fetch("/result.json", { cache: "no-cache" });
+          // 加 ?t= 时间戳避免 CDN / 浏览器命中旧缓存
+          const res = await fetch(`/result.json?t=${Date.now()}`, { cache: "no-cache" });
           if (!res.ok) throw new Error("HTTP " + res.status);
           const data = await res.json();
           window.__flinkData = data;
