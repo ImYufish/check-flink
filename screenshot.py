@@ -47,6 +47,11 @@ def _build_thumio_url(url: str) -> str:
     return f"https://image.thum.io/get/width/{WINDOW_WIDTH}/crop/{WINDOW_HEIGHT}/png/{url}"
 
 
+def _build_mshots_url(url: str) -> str:
+    """WordPress.com mshots 截图 URL（用于 EdgeOne/Cloudflare WAF 拦截站点的最后兜底）"""
+    return f"https://s0.wp.com/mshots/v1/{url}?w=400&h=300"
+
+
 def delete_from_imagebed(filename: str) -> bool:
     """
     上传前删除图床上的同名旧图，避免重复堆积
@@ -204,7 +209,8 @@ def take_screenshot(url: str, host: str) -> str:
     2. 访问 URL，等待 3 秒
     3. 截图 → PNG 字节流
     4. 上传至 tu.fqzlr.com/youlian/{host}.png
-    5. 失败兜底到 thum.io 在线截图 URL
+    5. 失败兜底到 mshots（下载 + 上传图床）
+    6. 最后兜底到 thum.io 在线截图 URL
     """
     filename = _safe_filename(host)
 
@@ -216,13 +222,29 @@ def take_screenshot(url: str, host: str) -> str:
             uploaded = upload_to_imagebed(png_bytes, filename)
             if uploaded:
                 return uploaded
-            logger.warning(f"[fallback] 上传失败，降级到 thum.io：{url}")
+            logger.warning(f"[fallback] 上传失败，降级到 mshots：{url}")
         else:
-            logger.warning(f"[fallback] 截图失败，降级到 thum.io：{url}")
+            logger.warning(f"[fallback] 截图失败，降级到 mshots：{url}")
     except Exception as e:
-        logger.warning(f"[fallback] 异常，降级到 thum.io：{e}")
+        logger.warning(f"[fallback] 异常，降级到 mshots：{e}")
 
-    # 2. thum.io 兜底（永远可用）
+    # 2. mshots 兜底（下载 mshots 截图后再上传到图床）
+    try:
+        mshots_url = _build_mshots_url(url)
+        logger.info(f"[mshots] 尝试通过 WordPress.com mshots 截图：{mshots_url}")
+        resp = requests.get(mshots_url, timeout=30)
+        if resp.status_code == 200:
+            delete_from_imagebed(filename)
+            uploaded = upload_to_imagebed(resp.content, filename)
+            if uploaded:
+                return uploaded
+            logger.warning(f"[mshots] 上传失败，降级到 thum.io")
+        else:
+            logger.warning(f"[mshots] HTTP {resp.status_code}，降级到 thum.io")
+    except Exception as e:
+        logger.warning(f"[mshots] 失败：{e}，降级到 thum.io")
+
+    # 3. thum.io 最终兜底（永远可用）
     return _build_thumio_url(url)
 
 
