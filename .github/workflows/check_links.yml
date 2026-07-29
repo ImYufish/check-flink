@@ -1,4 +1,4 @@
-﻿name: Check Links and Generate JSON
+name: Check Links and Generate JSON
 
 on:
   schedule:
@@ -67,6 +67,9 @@ jobs:
           echo "✅ 下载成功（$(stat -c%s ./result.json) bytes）"
           python check_siteshot.py ./result.json
         fi
+        # 【修复截图丢失】留一份下载时的 baseline，状态检测后再交叉回填 siteshot（双重保险）
+        cp -f ./result.json ./result.baseline.json
+        echo "baseline 已保存: $(stat -c%s ./result.baseline.json) bytes"
 
     - name: Run Python script to check frined-links
       env:
@@ -82,6 +85,67 @@ jobs:
         echo "AUTHOR_URL: $AUTHOR_URL"
         echo "TARGET_LINK: $TARGET_LINK"
         python main.py
+
+    - name: Cross-fill siteshot from baseline (defense-in-depth)
+      run: |
+        echo "==== baseline vs 检测后 siteshot 交叉回填 ===="
+        python3 - <<'PY'
+        import json, os, re, sys
+        def norm(u):
+            u=(u or '').strip().lower()
+            u=re.sub(r'^https?://','',u).rstrip('/')
+            for s in ('?','#'):
+                u=u.split(s,1)[0] if s in u else u
+            return u
+        def host(u):
+            return norm(u).split('/',1)[0] if norm(u) else ''
+        baseline=sys.argv[1] if len(sys.argv)>1 else 'result.baseline.json'
+        target='result.json'
+        if not os.path.exists(baseline) or os.path.getsize(baseline)==0 or not os.path.exists(target):
+            print('跳过（无 baseline 或 result.json）')
+            sys.exit(0)
+        with open(baseline,encoding='utf-8') as f:
+            B=json.load(f)
+        with open(target,encoding='utf-8') as f:
+            T=json.load(f)
+        bl=B.get('link_status',[]) or []
+        tl=T.get('link_status',[]) or []
+        # 建 baseline 多键索引
+        idx_ex={}; idx_nm={}; idx_hh={}; idx_ho={}
+        for e in bl:
+            L=e.get('link','') or ''
+            N=(e.get('name','') or '').strip().lower()
+            if L: idx_ex.setdefault(L,e)
+            n=norm(L); h=host(L)
+            if n and n not in idx_nm: idx_nm[n]=e
+            if N and h and (N,h) not in idx_hh: idx_hh[(N,h)]=e
+            if h: idx_ho.setdefault(h,[]).append(e)
+        def lookup(lk,nm):
+            if lk in idx_ex: return idx_ex[lk]
+            n=norm(lk); h=host(lk); nm=(nm or '').strip().lower()
+            if n and n in idx_nm: return idx_nm[n]
+            if nm and h and (nm,h) in idx_hh: return idx_hh[(nm,h)]
+            if h and len(idx_ho.get(h,[]))==1: return idx_ho[h][0]
+            if h and len(idx_ho.get(h,[]))==1 and nm:
+                o=idx_ho[h][0]; on=(o.get('name','') or '').strip().lower()
+                if on and (nm==on or nm in on or on in nm): return o
+            return {}
+        filled=0; before_empty=sum(1 for e in tl if not (e.get('siteshot') or '').strip())
+        for e in tl:
+            shot=(e.get('siteshot') or '').strip()
+            if shot: continue
+            m=lookup(e.get('link',''), e.get('name',''))
+            ps=(m.get('siteshot') or '').strip()
+            if ps:
+                e['siteshot']=ps
+                filled+=1
+        after_empty=sum(1 for e in tl if not (e.get('siteshot') or '').strip())
+        print(f"空 siteshot: {before_empty} → {after_empty}（本次找回 {filled}）")
+        T['link_status']=tl
+        with open(target,'w',encoding='utf-8') as f:
+            json.dump(T,f,ensure_ascii=False,indent=4)
+        PY
+        python check_siteshot.py ./result.json
 
     - name: Upload result.json as artifact
       uses: actions/upload-artifact@v4
