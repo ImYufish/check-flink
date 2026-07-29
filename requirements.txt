@@ -4,3 +4,5 @@ selenium==4.34.2
 webdriver-manager==4.0.2
 Pillow==11.3.0
 pyyaml==6.0.2
+# friends_watcher 文件系统事件监听（不装也可，watch 模式会回退到轮询）
+watchdog>=4.0.0; platform_system != "Emscripten"

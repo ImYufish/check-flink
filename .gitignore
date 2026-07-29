@@ -3,8 +3,14 @@
 # 本地友链数据（不提交，保护隐私）
 link.csv
 
+# friends_watcher 生成的临时文件 / 数据
+friends.json
+friends_snapshot.json
+_debug_repaired.json
+
 # 运行产物（不提交，CI 重新生成）
 result.json
+result.baseline.json
 
 # Python 编译缓存
 __pycache__/
