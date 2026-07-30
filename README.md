@@ -32,7 +32,9 @@
   - [Step 8 · 博客侧接入](#step-8--博客侧接入)
 - [📸 截图工作机制](#-截图工作机制)
 - [🎯 触发方式详解](#-触发方式详解)
+- [🔄 friendsConfig.ts 变更监听（friends_watcher）](#-friendsconfigts-变更监听friends_watcher)
 - [⚙️ 高级配置](#-高级配置)
+- [🌐 地域屏蔽诊断机制](#-地域屏蔽诊断机制)
 - [🐛 常见问题](#-常见问题)
 - [📜 二次开发](#-二次开发)
 - [📄 License](#-license)
@@ -45,11 +47,14 @@
 |------|------|
 | **🔍 友链状态检测** | 每天 2 次自动巡检，统计延迟 + 失败次数 + 反链存在 |
 | **📸 主页截图自动生成** | 每 6 天一次 Selenium 截图，自动上传图床 |
-| **🎯 智能兜底链** | Selenium 失败 → thum.io 在线截图 → 无白屏 |
+| **🎯 三级截图兜底** | Selenium → mshots（WordPress.com）→ thum.io，WAF 拦截站点也能截图 |
+| **🌐 地域屏蔽诊断** | 自动识别 EdgeOne/Cloudflare WAF 拦截，与真实故障区分 |
 | **🔌 单一数据源** | 友链配置只在博客侧维护，截图仓库自动读取 |
 | **📊 result.json 统一输出** | 状态 + 截图 URL 合并到一个 JSON，前端一次拉取 |
 | **🎯 灵活触发 + 增量处理** | 定时全自动 + 手动按需，可只处理单个友链，其余保留历史状态 |
 | **🔗 精准反链检测** | 仅识别真实 `<a href>` 超链接，纯文本提及不算反链 |
+| **🔄 文件变更监听** | `friends_watcher.py` 支持 `watch` 模式，friendsConfig.ts 变更自动触发增量检测 |
+| **🔧 调试工具集** | `check_siteshot.py` / `check_page.py` 快速检查结果数据 |
 | **🚀 GitHub Action 全自动** | 无服务器，零运维 |
 | **🧹 图床自动清理** | 上传前自动调用 cfbed 删除 API 清除同名旧图，避免资源堆积 |
 
@@ -78,15 +83,15 @@
 'siteshot': prev_entry.get('siteshot', ''),  # 保留历史截图，由 screenshot_runner 更新
 ```
 
-#### ➕ `screenshot.py`（**新增 207 行**）
+#### ➕ `screenshot.py`（**新增 250+ 行**）
 
 完整截图模块，**移植自 thun888**，但做了以下适配：
 
 | 项 | 原 thun888 | 本项目 |
 |----|-----------|--------|
 | 上传逻辑 | 推送到 `page` 分支 + GitHub Pages | 推送到 **cfbed.sanyue.de 兼容 API** |
-| 兜底逻辑 | 404.png 本地占位 | **thum.io 在线截图**（永远可用） |
-| 失败回退 | 直接失败 | **Selenium 失败 → thum.io**；**上传失败 → thum.io** |
+| 兜底逻辑 | 404.png 本地占位 | **mshots（WordPress.com）→ thum.io 在线截图** |
+| 失败回退 | 直接失败 | **Selenium 失败 → mshots（下载后上传图床）→ thum.io** |
 | 触发方式 | 独立 cron | **从 `result.json` 读取已检测的友链**，只对 `latency > 0` 的友链截图 |
 
 #### ➕ `screenshot_runner.py`（**新增 86 行**）
@@ -109,14 +114,17 @@ TARGET_LINK="某友链" → 只检测/截图该友链，其余保留上次结果
 - 触发懒加载图片
 - 移除 cookie 横幅 / 广告弹窗
 
-#### ✏️ `requirements.txt`（**改 3 行**）
+#### ✏️ `requirements.txt`（**改 7 行**）
 
-新增依赖：
+完整依赖：
 ```diff
 requests==2.32.3
++ python-dotenv==1.0.1
 + selenium==4.34.2
 + webdriver-manager==4.0.2
 + Pillow==11.3.0
++ pyyaml==6.0.2
++ watchdog>=4.0.0   # friends_watcher watch 模式（可选）
 ```
 
 #### ✏️ `.github/workflows/check_links.yml`（**大幅改造**）
@@ -159,16 +167,25 @@ check-flink/
 │   └── workflows/
 │       └── check_links.yml       # ⭐ 核心：双 Job 配置（状态 + 截图）
 ├── main.py                        # 状态检测（保留历史 siteshot 字段）
-├── screenshot.py                  # ⭐ 截图 + 上传 + 兜底
+├── screenshot.py                  # ⭐ 截图 + 上传 + 三级兜底（Selenium→mshots→thum.io）
 ├── screenshot_runner.py           # ⭐ 截图入口（独立 job 调用）
+├── geo_diagnose.py                # 地域屏蔽诊断模块（WAF/CDN 识别）
+├── friends_watcher.py             # friendsConfig.ts 变更监听 + 增量调度
+├── check_siteshot.py              # 调试：检查 result.json siteshot 状态
+├── check_page.py                  # 调试：检查 result.json 结构
 ├── inject.css                     # 截图时注入的 CSS
-├── requirements.txt               # 依赖（含 selenium）
+├── requirements.txt               # 依赖（含 selenium、python-dotenv、pyyaml）
 ├── .env.example                   # 环境变量示例
-├── link.csv                        # CSV 数据源（友链配置）
+├── link.csv                       # CSV 数据源（友链配置）
+├── 上传.bat                       # Windows 快速提交脚本
 ├── static/
 │   ├── index.html                 # 原作者自带的结果展示页
 │   ├── result.json                # 自动生成：状态 + 截图统一数据
-│   └── pic-doc/                   # README 配图
+│   ├── pic-doc/                   # README 配图
+│   ├── edgeone.json               # EdgeOne CORS 配置
+│   └── readme.md                  # static 目录说明
+├── .trae/
+│   └── documents/                 # 计划文档
 └── README.md                      # 本文件
 ```
 
@@ -177,8 +194,11 @@ check-flink/
 | 文件 | 作用 | 何时被调用 |
 |------|------|------------|
 | `main.py` | 读友链 → 测延迟 → 写 result.json | check_links job（每天 2 次） |
-| `screenshot.py` | 单条截图 + 上传 + 兜底 | 被 screenshot_runner 调用 |
+| `screenshot.py` | 单条截图 + 上传 + 三级兜底（Selenium→mshots→thum.io） | 被 screenshot_runner 调用 |
 | `screenshot_runner.py` | 遍历 result.json → 调用 screenshot → 写回 | take_screenshots job（6 天 1 次） |
+| `geo_diagnose.py` | 区分「地域屏蔽」与「真实故障」（EdgeOne/Cloudflare WAF 识别） | 被 main.py 导入（检测失败时自动调用） |
+| `friends_watcher.py` | 解析 friendsConfig.ts → 对比快照 → 增量调度 main.py + screenshot_runner.py | 本地开发/CI 手动触发（diff/run/watch 三种模式） |
+| `check_siteshot.py` | 调试：统计 result.json 中 siteshot 字段的空/真图床/thum.io 分布 | workflow 各关键步骤自动调用 + 本地调试 |
 | `inject.css` | 隐藏截图时的滚动条 | screenshot.py 内部注入到目标页面 |
 | `result.json` | 最终输出，被博客前端 fetch | 每次 job 结束后更新 |
 
@@ -378,12 +398,15 @@ SOURCE_URL = ./link.csv
 - [SM.MS](https://sm.ms/)（国内访问快）
 - 自建兰空图床 / Lsky Pro
 
-> ⚠️ **API 必须兼容 cfbed 规范**（POST + `authCode` + `uploadFolder`）
+> ⚠️ **API 必须兼容 cfbed 规范**（POST + `Authorization: Bearer` + `uploadFolder`）
+> 
+> 新版 cfbed 已废弃 `authCode` query 参数，只认 `Authorization: Bearer` 头。
 
 #### API 调用规范（参考）
 
 ```http
-POST /upload?authCode=xxx&uploadFolder=youlian&uploadNameType=origin
+POST /upload?uploadFolder=youlian&uploadNameType=origin
+Authorization: Bearer <你的TOKEN>
 Content-Type: multipart/form-data
 
 file=<binary PNG>
@@ -556,14 +579,16 @@ Level 1：Selenium 本地截图
   ├─ 成功 → 上传图床
   │   ├─ 成功 → https://tu.xxx.com/youlian/host.png
   │   └─ 失败（401 等）↓ Level 2
-  └─ 失败（chromedriver 异常等）↓ Level 2
+  └─ 失败（chromedriver 异常 / WAF拦截）↓ Level 2
 
-Level 2：thum.io 在线截图
+Level 2：WordPress.com mshots 在线截图
+  ├─ https://s0.wp.com/mshots/v1/{url}?w=400&h=300
+  ├─ 下载后上传图床，保持统一的图床 URL
+  └─ 失败（HTTP 非200 / 上传失败）↓ Level 3
+
+Level 3：thum.io 最终兜底
   └─ https://image.thum.io/get/width/1280/crop/800/png/{url}
-     （永远可用，免费但有 ~1 秒延迟）
-
-Level 3：（本项目未实现，但可扩展）
-  └─ 404.png 本地占位
+     （永远可用，免费但有 ~1 秒延迟，URL 直出不经过图床）
 ```
 
 ---
@@ -617,6 +642,52 @@ take_screenshots:
 - **screenshot_runner.py**：只截图匹配的可达友链，其余友链的 `siteshot` 字段保持不变。
 
 > 💡 典型场景：新增/修改某个友链后，手动触发 `task=both` + `target_link=友链名`，几十秒即可完成单个友链的检测 + 截图，无需全量跑。
+
+---
+
+## 🔄 friendsConfig.ts 变更监听（friends_watcher）
+
+`friends_watcher.py` 是本地/CI 工具，用于**监听博客侧 `friendsConfig.ts` 文件的变更，自动触发增量检测和截图**。
+
+### 三种模式
+
+| 模式 | 命令 | 用途 |
+|------|------|------|
+| `diff` | `python friends_watcher.py diff --config <path>` | 解析 + 对比快照，输出差异（不执行检测） |
+| `run` | `python friends_watcher.py run --config <path>` | 解析 + 差异 → 增量检测 + 截图 |
+| `watch` | `python friends_watcher.py watch --config <path>` | 常驻轮询文件变更 → debounce → 自动触发 run |
+
+### 使用示例
+
+```bash
+# 查看差异（JSON 格式输出，适合 CI）
+python friends_watcher.py diff --config ../fqzlr-bk/src/config/friendsConfig.ts --json
+
+# 执行增量检测 + 截图
+python friends_watcher.py run --config ../fqzlr-bk/src/config/friendsConfig.ts
+
+# 只执行检测，不截图
+python friends_watcher.py run --config ../fqzlr-bk/src/config/friendsConfig.ts --skip-screenshot
+
+# 常驻监听（轮询间隔 30s，变更后 5s 防抖）
+python friends_watcher.py watch --config ../fqzlr-bk/src/config/friendsConfig.ts --interval 30
+```
+
+### 增量检测逻辑
+
+| 变更类型 | 处理方式 |
+|---------|---------|
+| **新增站点** | 完整检测 + 截图 |
+| **修改站点** | 仅 `CRITICAL_FIELDS`（`siteurl`/`linkpage`/`enabled`）变化时重测；纯 title/imgurl/desc/tags/weight 变动跳过 |
+| **移除站点** | 保留快照，不触发检测 |
+| **其余站点** | 保留历史数据，不重复检测 |
+
+### 技术细节
+
+- **Layer1 解析**：通过 `tsx` 执行 Node.js 导入，AST 级别解析 `friendsConfig.ts`（优先）
+- **Layer2 回退**：正则修复 TS 数组字面量 → 合法 JSON（当 `tsx` 不可用时自动降级）
+- **快照机制**：`friends_snapshot.json` 记录上次解析结果，后续对比产出差异
+- **输出文件**：自动生成 `friends.json`（check-flink 兼容的 `SOURCE_URL` 格式）
 
 ---
 
@@ -710,6 +781,36 @@ FRIENDLY_GEO_HOSTS = {
 
 ---
 
+## 🌐 地域屏蔽诊断机制
+
+### 背景
+
+部分友链站点部署了 **EdgeOne / Cloudflare WAF** 等安全防护，从 GitHub Actions（海外 IP）访问会被拦截，但国内用户可正常访问。
+
+本项目通过 `geo_diagnose.py` 模块自动区分"地域屏蔽"与"真实故障"。
+
+### 诊断流程（三步策略）
+
+| 策略 | 方法 | 说明 |
+|------|------|------|
+| **A** | HTTP 响应状态码 + 响应体/标题关键字匹配 | EdgeOne 特征词（如"安全策略"、"请求已被拦截"）、WAF 标识 |
+| **B** | 国内公共 HTTP 探测节点交叉验证 | 调用 `api.vvhan.com` 等国内 Ping API，国内可达则判定为地域屏蔽 |
+| **C** | DNS 解析 + TCP 443 握手健康度辅助判断 | TCP 可建连但 HTTP 异常 → 服务器活着但拦请求 → 高可能地域/WAF |
+
+### 判定结果
+
+| 状态 | 含义 | 前端显示 |
+|------|------|---------|
+| `geo_blocked` | 被 WAF 拦截，非真实故障 | 正常（通过豁免列表强制标记为 ok） |
+| `error` | 真实故障（TCP 不通 / 无响应） | 失效暂留 / 失效 |
+| `unknown` | 无法判断 | 失效暂留 |
+
+### 站点豁免
+
+已被 WAF 拦截但已知可正常访问的站点，通过 `FRIENDLY_GEO_HOSTS` 强制标记为正常（见 [高级配置 → 站点豁免](#7-站点豁免wafcdn-误拦截)）。
+
+---
+
 ## 🐛 常见问题
 
 ### Q1: Workflow 跑完但 `page` 分支没更新？
@@ -730,7 +831,7 @@ FRIENDLY_GEO_HOSTS = {
 4. 本地快速测试：
    ```bash
    curl -X POST "https://tu.xxx.com/upload?uploadFolder=youlian&uploadNameType=origin" \
-     -H "Authorization: Bearer 你的TOKEN" \
+     -H "Authorization: Bearer <你的TOKEN>" \
      -F "file=@test.png"
    ```
    应返回 `200 OK` + JSON 数组。
@@ -836,6 +937,31 @@ webdriver-manager==4.0.2
 >
 > 解决方法：检查 cfbed 后台的 R2 CORS Policy（需允许 `DELETE`），或在 cfbed 后台「系统设置 → CloudFlare API Token」中配置 Global API Key 让 cfbed 自行清理缓存。
 
+### Q10: 截图全是 thum.io 兜底（没有真图床截图）？
+
+**A**: 检查 IMG_AUTH_CODE 是否正确，以及 cfbed 是否支持 Bearer 认证：
+
+1. 确认 `IMG_AUTH_CODE` Secret 已正确设置（值填完整的 token 字符串）
+2. 确认 cfbed 后端已更新到支持 Bearer 认证的版本
+3. 使用 curl 手动测试上传（见 [Q2: 截图全部走 thum.io 兜底](#q2-截图全部走-thumio-兜底上传图床全部-401)）
+
+### Q11: 地域屏蔽诊断不准确？
+
+**A**: 诊断准确性取决于关键词匹配和国内探测节点：
+
+1. 在 `FRIENDLY_GEO_HOSTS` 中添加豁免站点（见 [高级配置 → 站点豁免](#7-站点豁免wafcdn-误拦截)）
+2. 如果站点使用了新的 WAF 关键词，可在 `geo_diagnose.py` 的 `GEO_KEYWORDS_STRONG` 中添加
+3. 国内探测节点（`api.vvhan.com` 等）可能间歇性不可用，诊断会回退到策略 C
+
+### Q12: friends_watcher watch 模式不工作？
+
+**A**: 检查依赖和环境：
+
+1. 是否安装了 `watchdog`：`pip install watchdog`（否则回退到轮询模式，功能正常但无文件系统事件通知）
+2. `--config` 路径是否正确指向 `friendsConfig.ts` 文件
+3. 文件保存后需等待 debounce 时间（默认 5s）才会触发
+4. 如果 `tsx` 未安装，`friends_watcher.py` 会回退到 Layer2 正则解析，不影响功能
+
 ---
 
 ## 📜 二次开发
@@ -880,6 +1006,22 @@ python screenshot_runner.py
 # 单条友链测试
 python screenshot.py https://blog.liushen.fun/ blog.liushen.fun
 # 输出：{"url": "https://tu.xxx.com/youlian/blog.liushen.fun.png"}
+```
+
+### 调试工具
+
+```bash
+# 检查 result.json 截图状态（统计空/真图床/thum.io 分布）
+python check_siteshot.py ./result.json
+
+# 检查 result.json 结构
+type result.json | python check_page.py
+
+# 地域屏蔽诊断测试
+python geo_diagnose.py https://example.com
+
+# friendsConfig.ts 变更对比（查看差异）
+python friends_watcher.py diff --config ../fqzlr-bk/src/config/friendsConfig.ts --json
 ```
 
 ---
