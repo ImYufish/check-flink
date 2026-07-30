@@ -100,34 +100,8 @@ jobs:
               --current ./friends.latest.json \
               --historical ./result.json 2>/dev/null || true)
           else
-            # 回退：内联脚本检测（适用于无 friends_watcher.py 依赖的场景）
-            DETECTED=$(python3 -c "
-import json, sys
-try:
-    with open('friends.latest.json') as f: cur = json.load(f)
-    with open('result.json') as f: hist = json.load(f)
-except: sys.exit(0)
-links = cur.get('link_list', []) or (cur if isinstance(cur, list) else [])
-status = hist.get('link_status', []) or []
-prev = {e.get('link',''): e for e in status if e.get('link')}
-changed = []
-for it in links:
-    lk = (it.get('link') or '').strip()
-    if not lk: continue
-    p = prev.get(lk)
-    if p is None:
-        changed.append(lk)
-        print(f'[detect] 新增: {lk}', file=sys.stderr)
-    else:
-        pn = (p.get('name') or '').strip()
-        pl = (p.get('linkpage') or '').strip()
-        cn = (it.get('name') or '').strip()
-        cl = (it.get('linkpage') or '').strip()
-        if pn != cn or pl != cl:
-            changed.append(lk)
-            print(f'[detect] 修改: {lk}', file=sys.stderr)
-print('|'.join(dict.fromkeys(changed)))
-" 2>&1)
+            # 回退：python3 -c 紧凑脚本（避免 YAML 多行缩进问题）
+            DETECTED=$(python3 -c "import json,sys;C=json.load(open('friends.latest.json'));H=json.load(open('result.json'));L=C.get('link_list',[])or(C if isinstance(C,list)else[]);S=H.get('link_status',[])or[];P={e.get('link',''):e for e in S if e.get('link')};X=[];E=sys.stderr;exec('for I in L:\n K=(I.get(\"link\")or\"\").strip()\n if not K: continue\n if K not in P:\n  X.append(K);print(\"[detect] 新增: \"+K,file=E)\n else:\n  p=P[K];pn=(p.get(\"name\")or\"\").strip();pl=(p.get(\"linkpage\")or\"\").strip()\n  cn=(I.get(\"name\")or\"\").strip();cl=(I.get(\"linkpage\")or\"\").strip()\n  if pn!=cn or pl!=cl: X.append(K);print(\"[detect] 修改: \"+K,file=E)');print('|'.join(dict.fromkeys(X)))" 2>&1)
           fi
           if [ -n "$DETECTED" ]; then
             echo "检测到变更的友链: $DETECTED"
