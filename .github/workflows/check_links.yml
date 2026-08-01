@@ -58,8 +58,14 @@ jobs:
     - name: Download result.json from page branch
       run: |
         echo "从 page 分支拉取最新 result.json（含历史截图 URL）..."
+        # 先试根目录（page 分支实际在根目录），失败回退到 static/ 子目录
         HTTP_CODE=$(curl -sL -w "%{http_code}" -o ./result.json \
-          "https://raw.githubusercontent.com/${{ github.repository }}/page/static/result.json")
+          "https://raw.githubusercontent.com/${{ github.repository }}/page/result.json")
+        if [ "$HTTP_CODE" != "200" ]; then
+          echo "⚠️ 根目录未找到（HTTP $HTTP_CODE），尝试 static/result.json..."
+          HTTP_CODE=$(curl -sL -w "%{http_code}" -o ./result.json \
+            "https://raw.githubusercontent.com/${{ github.repository }}/page/static/result.json")
+        fi
         if [ "$HTTP_CODE" != "200" ] || [ ! -s ./result.json ]; then
           echo "⚠️ page 分支无 result.json（HTTP $HTTP_CODE），首次运行，创建空数据"
           echo "{}" > ./result.json
@@ -71,15 +77,55 @@ jobs:
         cp -f ./result.json ./result.baseline.json
         echo "baseline 已保存: $(stat -c%s ./result.baseline.json) bytes"
 
+    - name: Detect changes (auto-set TARGET_LINK)
+      id: detect_changes
+      env:
+        SOURCE_URL: ${{ secrets.SOURCE_URL }}
+      run: |
+        echo "==== 变更检测 ===="
+        echo "从 SOURCE_URL 拉取最新 friends.json..."
+        HTTP_CODE=$(curl -sL -w "%{http_code}" -o ./friends.latest.json \
+          "$SOURCE_URL" 2>/dev/null)
+        if [ "$HTTP_CODE" != "200" ] || [ ! -s ./friends.latest.json ]; then
+          echo "⚠️ 无法获取最新数据源（HTTP $HTTP_CODE），跳过变更检测，走全量检测"
+          echo "TARGET_LINK_DETECTED=" >> $GITHUB_ENV
+          exit 0
+        fi
+        echo "✅ 下载成功（$(stat -c%s ./friends.latest.json) bytes）"
+        echo "对比 result.json 检测变更..."
+        if [ -f ./result.json ] && [ -s ./result.json ]; then
+          # 优先使用 friends_watcher.py compare（如果可用）
+          if python -c "import friends_watcher" 2>/dev/null; then
+            DETECTED=$(python friends_watcher.py compare \
+              --current ./friends.latest.json \
+              --historical ./result.json 2>/dev/null || true)
+          else
+            # 回退：python3 -c 紧凑脚本（避免 YAML 多行缩进问题）
+            DETECTED=$(python3 -c "import json,sys;C=json.load(open('friends.latest.json'));H=json.load(open('result.json'));L=C.get('link_list',[])or(C if isinstance(C,list)else[]);S=H.get('link_status',[])or[];P={e.get('link',''):e for e in S if e.get('link')};X=[];E=sys.stderr;exec('for I in L:\n K=(I.get(\"link\")or\"\").strip()\n if not K: continue\n if K not in P:\n  X.append(K);print(\"[detect] 新增: \"+K,file=E)\n else:\n  p=P[K];pn=(p.get(\"name\")or\"\").strip();pl=(p.get(\"linkpage\")or\"\").strip()\n  cn=(I.get(\"name\")or\"\").strip();cl=(I.get(\"linkpage\")or\"\").strip()\n  if pn!=cn or pl!=cl: X.append(K);print(\"[detect] 修改: \"+K,file=E)');print('|'.join(dict.fromkeys(X)))" 2>&1)
+          fi
+          if [ -n "$DETECTED" ]; then
+            echo "检测到变更的友链: $DETECTED"
+            echo "TARGET_LINK_DETECTED=$DETECTED" >> $GITHUB_ENV
+          else
+            echo "未检测到变更"
+            echo "TARGET_LINK_DETECTED=" >> $GITHUB_ENV
+          fi
+        else
+          echo "result.json 不存在或为空，首次运行，走全量检测"
+          echo "TARGET_LINK_DETECTED=" >> $GITHUB_ENV
+        fi
+        rm -f ./friends.latest.json
+
     - name: Run Python script to check frined-links
       env:
         PROXY_URL: ${{ secrets.PROXY_URL }}
         SOURCE_URL: ${{ secrets.SOURCE_URL }}
         AUTHOR_URL: ${{ secrets.AUTHOR_URL }}
+        # 优先级：手动输入的 target_link > 自动检测的变更 > 空（全量）
         # 关键：screenshots_only 模式下，check_links 跑全部友链（不应用 target_link 过滤），
         # 避免把 result.json 过滤成只剩 target_link 那一条、丢失其他友链的状态和截图 URL。
         # target_link 过滤只应在 take_screenshots job 中生效。
-        TARGET_LINK: ${{ inputs.task == 'screenshots_only' && '' || inputs.target_link }}
+        TARGET_LINK: ${{ inputs.task == 'screenshots_only' && '' || (inputs.target_link || env.TARGET_LINK_DETECTED) }}
       run: |
         echo "SOURCE_URL: $SOURCE_URL"
         echo "AUTHOR_URL: $AUTHOR_URL"
@@ -147,6 +193,49 @@ jobs:
         PY
         python check_siteshot.py ./result.json
 
+    - name: Incremental screenshot (only when changes detected)
+      if: ${{ inputs.task != 'screenshots_only' }}
+      env:
+        IMG_UPLOAD_URL: ${{ secrets.IMG_UPLOAD_URL }}
+        IMG_AUTH_CODE: ${{ secrets.IMG_AUTH_CODE }}
+        SCREENSHOT_WORKERS: '2'
+        TARGET_LINK: ${{ env.TARGET_LINK_DETECTED || inputs.target_link }}
+      run: |
+        if [ -z "$TARGET_LINK" ]; then
+          echo "无变更友链，跳过增量截图"
+          exit 0
+        fi
+        echo "检测到友链变更，增量截图..."
+        echo "TARGET_LINK: $TARGET_LINK"
+        echo "IMG_UPLOAD_URL: $IMG_UPLOAD_URL"
+
+        # 安装 Chrome
+        if ! command -v google-chrome &>/dev/null; then
+          echo "安装 Chrome..."
+          if command -v apt-get &>/dev/null; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq google-chrome-stable 2>/dev/null || \
+              (wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && \
+               sudo dpkg -i /tmp/chrome.deb 2>/dev/null; sudo apt-get install -f -y -qq)
+            rm -f /tmp/chrome.deb
+          fi
+          echo "Chrome 安装完成"
+        fi
+        # 安装中文字体
+        if ! fc-list :lang=zh 2>/dev/null | grep -q .; then
+          sudo apt-get install -y -qq fonts-wqy-microhei fonts-wqy-zenhei 2>/dev/null || true
+        fi
+
+        export CHROME_BIN=$(command -v google-chrome || echo "/usr/bin/google-chrome")
+        echo "CHROME_BIN: $CHROME_BIN"
+
+        echo "==== result.json 状态（截图前） ===="
+        python check_siteshot.py ./result.json
+
+        python screenshot_runner.py
+
+        echo "==== result.json 状态（截图后） ===="
+        python check_siteshot.py ./result.json
+
     - name: Upload result.json as artifact
       uses: actions/upload-artifact@v4
       with:
@@ -186,7 +275,8 @@ jobs:
   take_screenshots:
     name: 截取友链主页截图
     runs-on: ubuntu-latest
-    needs: [check_links]
+    # 关键改动：删除 needs: [check_links]，让此 job 完全独立
+    # 数据从 page 分支 curl 拉取，不依赖 check_links 的 artifact
     # 仅在【每 6 天定时】或【手动选择 screenshots_only / both】时执行
     if: ${{ (github.event_name == 'schedule' && github.event.schedule == '30 1 1,7,13,19,25 * *') || (github.event_name == 'workflow_dispatch' && (inputs.task == 'screenshots_only' || inputs.task == 'both')) }}
     steps:
@@ -224,13 +314,23 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y fonts-wqy-microhei fonts-wqy-zenhei
 
-    - name: Download result.json artifact (from check_links)
-      uses: actions/download-artifact@v4
-      with:
-        name: 'result_json'
-        path: './'
-        # 改为 error：拿不到 result.json 直接让 job 失败，暴露问题
-        if-no-result-found: error
+    - name: Download result.json from page branch
+      run: |
+        echo "从 page 分支拉取最新 result.json（含状态 + 历史截图 URL）..."
+        # 先试根目录（page 分支实际在根目录），失败回退到 static/ 子目录
+        HTTP_CODE=$(curl -sL -w "%{http_code}" -o ./result.json \
+          "https://raw.githubusercontent.com/${{ github.repository }}/page/result.json")
+        if [ "$HTTP_CODE" != "200" ]; then
+          echo "⚠️ 根目录未找到（HTTP $HTTP_CODE），尝试 static/result.json..."
+          HTTP_CODE=$(curl -sL -w "%{http_code}" -o ./result.json \
+            "https://raw.githubusercontent.com/${{ github.repository }}/page/static/result.json")
+        fi
+        if [ "$HTTP_CODE" != "200" ] || [ ! -s ./result.json ]; then
+          echo "❌ page 分支无 result.json（HTTP $HTTP_CODE），截图 job 无法运行"
+          exit 1
+        fi
+        echo "✅ 下载成功（$(stat -c%s ./result.json) bytes）"
+        python check_siteshot.py ./result.json
 
     - name: Run screenshot
       env:
@@ -253,13 +353,6 @@ jobs:
         echo "IMG_UPLOAD_URL: $IMG_UPLOAD_URL"
         echo "TARGET_LINK: $TARGET_LINK"
         python screenshot_runner.py
-
-    - name: Upload updated result.json as artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: 'result_json_with_shot'
-        path: './result.json'
-        retention-days: 10
 
     - name: Configure git
       run: |

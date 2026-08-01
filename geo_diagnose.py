@@ -35,6 +35,9 @@ GEO_KEYWORDS_STRONG = [
     "您的地区", "您的ip地区", "ip地区限制", "地区限制",
     "中国大陆", "仅限中国", "仅支持中国", "大陆访问",
     "仅限内地", "内地访问", "港澳台", "境外访问",
+    # Tencent Cloud EdgeOne
+    "安全策略", "安全防护服务", "已被限制",
+    "请求已被站点的安全策略拦截",
     # 英文
     "not available in your region", "not available in your country",
     "available in china", "china mainland only", "mainland china only",
@@ -57,6 +60,9 @@ CDN_WAF_MARKERS = [
     "tencent cloud waf", "qcloud waf", "tsec",
     "wangsu", "wangsuwaf",
     "qianxin", "360waf", "anquanbao",
+    # Tencent Cloud EdgeOne
+    "edgeone", "tencent cloud edgeone",
+    "腾讯云edgeone", "腾讯云 EdgeOne",
 ]
 
 GEO_STATUS_CODES = {403, 451, 444, 401}

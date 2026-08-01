@@ -393,11 +393,13 @@ def compute_diff(arr: list[dict]) -> dict[str, list[dict]]:
     }
 
 
-def filter_needs_detect(diff: dict) -> list[dict]:
+def filter_needs_detect(diff: dict, snap: dict | None = None) -> list[dict]:
     """从 added/modified 中挑出需要做 检测+截图 的条目。
     modified 中仅 CRITICAL_FIELDS 有变动的才重测；纯 title/imgurl/desc/tags/weight 变动跳过检测。
+    snap: 可选，传入已加载的快照（避免重复读文件）；为 None 时内部加载。
     """
-    snap = load_snapshot()
+    if snap is None:
+        snap = load_snapshot()
     prev = snap.get("friends", {})
     out: list[dict] = []
     for it in diff["added"]:
@@ -587,38 +589,131 @@ def _do_watch(config_path: Path, interval: int, debounce: int, skip_screenshot: 
             time.sleep(interval)
 
 
+# ======================================================================
+# 6. compare 模式：对比两个 JSON 数据源，输出 TARGET_LINK 格式差异
+# ======================================================================
+
+def _do_compare(current_json: Path, historical_json: Path) -> int:
+    """compare 模式：读取两个 JSON 文件，对比 link_list 差异，输出 TARGET_LINK。
+    current_json: 最新的 friends.json（数据源，含 link_list）
+    historical_json: 当前的 result.json（历史状态，含 link_status）
+    返回 0=无变更，1=有变更
+    """
+    if not current_json.exists():
+        logger.error(f"[compare] 当前数据源不存在: {current_json}")
+        return 2
+    if not historical_json.exists():
+        logger.info(f"[compare] 历史数据不存在（首次运行），输出全量 TARGET_LINK")
+        # 首次运行：输出所有启用的 link
+        try:
+            cur = json.loads(current_json.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.error(f"[compare] 解析当前数据源失败: {e}")
+            return 2
+        link_list = cur.get("link_list", []) if isinstance(cur, dict) else cur
+        links = [it.get("link", "") for it in link_list if it.get("link")]
+        if links:
+            target = "|".join(dict.fromkeys(links))
+            print(target)
+            logger.info(f"[compare] 输出全量 TARGET_LINK: {len(links)} 条")
+        return 1  # 有变更（首次全量）
+
+    try:
+        cur = json.loads(current_json.read_text(encoding="utf-8"))
+        hist = json.loads(historical_json.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.error(f"[compare] 解析 JSON 失败: {e}")
+        return 2
+
+    link_list = cur.get("link_list", []) if isinstance(cur, dict) else cur
+    hist_status = hist.get("link_status", []) if isinstance(hist, dict) else []
+
+    # 构建历史索引：link → entry
+    prev_links: dict[str, dict] = {}
+    for e in hist_status:
+        lk = (e.get("link") or "").strip()
+        if lk:
+            prev_links[lk] = e
+
+    # 检测新增/修改
+    changed: list[str] = []
+    for it in link_list:
+        lk = (it.get("link") or "").strip()
+        if not lk:
+            continue
+        prev = prev_links.get(lk)
+        if prev is None:
+            # 新增的友链
+            changed.append(lk)
+            logger.info(f"[compare] 新增: {lk}")
+        else:
+            # 检查关键字段是否变化（name / linkpage）
+            prev_name = (prev.get("name") or "").strip()
+            prev_linkpage = (prev.get("linkpage") or "").strip()
+            cur_name = (it.get("name") or "").strip()
+            cur_linkpage = (it.get("linkpage") or "").strip()
+            if prev_name != cur_name or prev_linkpage != cur_linkpage:
+                changed.append(lk)
+                logger.info(f"[compare] 修改: {lk} (name/linkpage 变化)")
+
+    if changed:
+        target = "|".join(dict.fromkeys(changed))
+        print(target)
+        logger.info(f"[compare] 输出 TARGET_LINK: {len(changed)} 条变更")
+        return 1
+
+    logger.info("[compare] 无变更")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="friends_watcher", description="friendsConfig.ts 变更监听 + 增量检测/截图调度")
-    ap.add_argument("--config", required=True, type=Path, help="friendsConfig.ts 文件路径")
     sub = ap.add_subparsers(dest="mode", required=True)
     # diff
     d = sub.add_parser("diff", help="解析并输出差异（不执行检测/截图）")
+    d.add_argument("--config", required=True, type=Path, help="friendsConfig.ts 文件路径")
     d.add_argument("--json", action="store_true", help="以 JSON 格式输出")
     d.add_argument("--exit-code", action="store_true", help="有变更时退出码=1，无变更=0（CI 用）")
     # run
     r = sub.add_parser("run", help="一次性执行：解析→diff→增量检测+截图→更新快照")
+    r.add_argument("--config", required=True, type=Path, help="friendsConfig.ts 文件路径")
     r.add_argument("--skip-screenshot", action="store_true", help="只执行检测，不执行截图")
     r.add_argument("--no-update-snapshot", action="store_true", help="完成后不更新快照（调试用）")
     # watch
     w = sub.add_parser("watch", help="常驻监听：按 --interval 轮询文件 mtime，变更经 debounce 后触发 run")
+    w.add_argument("--config", required=True, type=Path, help="friendsConfig.ts 文件路径")
     w.add_argument("--interval", type=int, default=10, help="轮询间隔(秒)，默认 10")
     w.add_argument("--debounce", type=int, default=5, help="变更防抖(秒)，默认 5；连续保存只触发一次")
     w.add_argument("--skip-screenshot", action="store_true", help="只执行检测，不执行截图")
+    # compare
+    c = sub.add_parser("compare", help="对比两个 JSON 数据源，输出 TARGET_LINK（CI 用）")
+    c.add_argument("--current", required=True, type=Path, help="最新的 friends.json（数据源）")
+    c.add_argument("--historical", required=True, type=Path, help="当前的 result.json（历史状态）")
     return ap
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    config_path: Path = args.config
-    if not config_path.exists():
-        logger.error(f"找不到配置文件: {config_path}")
-        return 2
     if args.mode == "diff":
+        config_path: Path = args.config
+        if not config_path.exists():
+            logger.error(f"找不到配置文件: {config_path}")
+            return 2
         return _do_diff(config_path, print_json=args.json, exit_code=args.exit_code)
     if args.mode == "run":
+        config_path: Path = args.config
+        if not config_path.exists():
+            logger.error(f"找不到配置文件: {config_path}")
+            return 2
         return _do_run(config_path, skip_screenshot=args.skip_screenshot, no_update_snapshot=args.no_update_snapshot)
     if args.mode == "watch":
+        config_path: Path = args.config
+        if not config_path.exists():
+            logger.error(f"找不到配置文件: {config_path}")
+            return 2
         return _do_watch(config_path, interval=args.interval, debounce=args.debounce, skip_screenshot=args.skip_screenshot)
+    if args.mode == "compare":
+        return _do_compare(args.current, args.historical)
     logger.error(f"未知 mode: {args.mode}")
     return 2
 
