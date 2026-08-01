@@ -466,7 +466,7 @@ def schedule_incremental(targets: list[dict], skip_screenshot: bool = False) -> 
             exact_keys.append(u)
         elif t:
             exact_keys.append(t)
-    target_link = "|".join(dict.fromkeys(exact_keys))  # 去重保序
+    target_link = ",".join(dict.fromkeys(exact_keys))  # 去重保序
     if not target_link:
         logger.warning("[schedule] 构造 TARGET_LINK 为空，取消")
         return
@@ -613,7 +613,7 @@ def _do_compare(current_json: Path, historical_json: Path) -> int:
         link_list = cur.get("link_list", []) if isinstance(cur, dict) else cur
         links = [it.get("link", "") for it in link_list if it.get("link")]
         if links:
-            target = "|".join(dict.fromkeys(links))
+            target = ",".join(dict.fromkeys(links))
             print(target)
             logger.info(f"[compare] 输出全量 TARGET_LINK: {len(links)} 条")
         return 1  # 有变更（首次全量）
@@ -657,7 +657,7 @@ def _do_compare(current_json: Path, historical_json: Path) -> int:
                 logger.info(f"[compare] 修改: {lk} (name/linkpage 变化)")
 
     if changed:
-        target = "|".join(dict.fromkeys(changed))
+        target = ",".join(dict.fromkeys(changed))
         print(target)
         logger.info(f"[compare] 输出 TARGET_LINK: {len(changed)} 条变更")
         return 1

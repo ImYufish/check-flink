@@ -32,6 +32,7 @@
   - [Step 8 · 博客侧接入](#step-8--博客侧接入)
 - [📸 截图工作机制](#-截图工作机制)
 - [🎯 触发方式详解](#-触发方式详解)
+- [📖 使用教程](#-使用教程)
 - [🔄 friendsConfig.ts 变更监听（friends_watcher）](#-friendsconfigts-变更监听friends_watcher)
 - [⚙️ 高级配置](#-高级配置)
 - [🌐 地域屏蔽诊断机制](#-地域屏蔽诊断机制)
@@ -138,7 +139,7 @@ requests==2.32.3
 
 **手动触发参数**（workflow_dispatch）：
 - `task`：选择执行内容（status_only / screenshots_only / both）
-- `target_link`：只处理指定友链（填名称或 URL 关键词，留空 = 全部）
+- `target_link`：只处理指定友链（填名称或 URL 关键词，多个用逗号分隔，留空 = 全部）
 
 **为什么不合并成一个 job**？
 - Selenium + Chrome 安装耗时 ~2-3 分钟
@@ -621,6 +622,7 @@ Level 3：thum.io 最终兜底
 
 - 留空 → 处理全部友链
 - 填关键词（友链名称或 URL 子串）→ 只处理匹配的那一个，**其余友链保留历史状态**（增量更新，不丢数据）
+- **多个友链**：使用英文逗号 `,` 分隔，如 `番茄,blog.example.com,清羽飞扬`
 
 ### 三、Job 触发条件（workflow 内部逻辑）
 
@@ -642,6 +644,199 @@ take_screenshots:
 - **screenshot_runner.py**：只截图匹配的可达友链，其余友链的 `siteshot` 字段保持不变。
 
 > 💡 典型场景：新增/修改某个友链后，手动触发 `task=both` + `target_link=友链名`，几十秒即可完成单个友链的检测 + 截图，无需全量跑。
+
+---
+
+## 📖 使用教程
+
+### 一、基础使用流程
+
+#### 1. 首次部署
+
+1. **Fork 仓库** → **配置 Secrets** → **开启 Actions 权限**（详见 [部署教程](#-部署教程)）
+2. **首次触发**：选择 `task=both`，`target_link` 留空，运行全量检测 + 截图
+3. **部署到 Vercel**：让 `result.json` 走 CDN 加速
+4. **博客接入**：在博客前端 fetch `result.json` 显示友链状态
+
+#### 2. 日常使用
+
+**自动运行**：系统每天自动检测 2 次（01:00/13:00），每 6 天自动截图一次
+
+**手动触发**：在 Actions → Run workflow 面板：
+- `task`：选择任务类型
+- `target_link`：指定友链（可选）
+
+### 二、常见使用场景
+
+#### 场景 1：新增友链后快速检测
+
+**问题**：新增友链后，想立即检测状态和截图，不想等全量运行
+
+**解决方案**：
+1. 在 Actions → Run workflow
+2. `task` 选择 `both`
+3. `target_link` 填写新增的友链名称或 URL 关键词
+4. 点击 Run workflow
+
+**示例**：
+```
+task: both
+target_link: 新友链名
+```
+
+#### 场景 2：批量检测多个友链
+
+**问题**：想同时检测多个指定友链
+
+**解决方案**：
+1. 在 Actions → Run workflow
+2. `task` 选择 `both`
+3. `target_link` 使用逗号分隔多个友链
+4. 点击 Run workflow
+
+**示例**：
+```
+task: both
+target_link: 番茄主理人,blog.astrvow.com,清羽飞扬
+```
+
+#### 场景 3：仅更新截图（不重新检测状态）
+
+**问题**：友链状态正常，但想重新截图（如友链网站改版）
+
+**解决方案**：
+1. 在 Actions → Run workflow
+2. `task` 选择 `screenshots_only`
+3. `target_link` 填写友链名称或 URL 关键词
+4. 点击 Run workflow
+
+**示例**：
+```
+task: screenshots_only
+target_link: blog.astrvow.com
+```
+
+#### 场景 4：仅检测状态（不截图）
+
+**问题**：只想更新友链状态，不想等待截图完成
+
+**解决方案**：
+1. 在 Actions → Run workflow
+2. `task` 选择 `status_only`（默认）
+3. `target_link` 留空（全量）或填写指定友链
+4. 点击 Run workflow
+
+**示例**：
+```
+task: status_only
+target_link: 
+```
+
+#### 场景 5：修复截图黑屏/失败问题
+
+**问题**：某个友链截图黑屏或失败，需要重新截图
+
+**解决方案**：
+1. 在 Actions → Run workflow
+2. `task` 选择 `screenshots_only`
+3. `target_link` 填写问题友链
+4. 点击 Run workflow
+
+**示例**：
+```
+task: screenshots_only
+target_link: blog.astrvow.com
+```
+
+### 三、高级使用技巧
+
+#### 1. 增量处理机制
+
+**原理**：只处理 `target_link` 指定的友链，其余友链保留历史状态
+
+**优势**：
+- 节省时间：无需全量运行
+- 数据完整：历史状态不丢失
+- 灵活控制：按需处理指定友链
+
+**示例**：
+```
+# 只检测两个友链，其余保留历史状态
+task: both
+target_link: 番茄主理人,blog.astrvow.com
+```
+
+#### 2. 关键词匹配规则
+
+**匹配方式**：
+- 友链名称：如 `番茄主理人`
+- URL 关键词：如 `blog.astrvow.com`
+- 子串匹配：如 `astrvow`（匹配包含该字符串的友链）
+
+**示例**：
+```
+# 匹配名称包含"番茄"的友链
+target_link: 番茄
+
+# 匹配 URL 包含"astrvow"的友链
+target_link: astrvow
+
+# 混合匹配
+target_link: 番茄,astrvow
+```
+
+#### 3. 调试与验证
+
+**查看运行日志**：
+1. 进入 Actions 标签
+2. 点击最近的 workflow run
+3. 查看各个 step 的日志输出
+
+**验证结果**：
+```bash
+# 查看 result.json 内容
+curl https://check-flink-xxx.vercel.app/result.json | head -50
+
+# 检查截图状态
+python check_siteshot.py ./result.json
+```
+
+### 四、最佳实践
+
+#### 1. 日常维护建议
+
+- **自动运行**：依赖系统自动检测（每天 2 次）
+- **手动触发**：仅在需要时手动触发（如新增友链）
+- **定期检查**：每周检查一次 result.json 状态
+
+#### 2. 性能优化建议
+
+- **批量处理**：多个友链用逗号分隔，一次处理
+- **选择性截图**：仅对需要更新的友链截图
+- **避免频繁触发**：节省 GitHub Actions 配额
+
+#### 3. 故障处理建议
+
+- **截图失败**：使用 `screenshots_only` 重新截图
+- **状态异常**：检查友链网站是否可访问
+- **图床问题**：验证 IMG_AUTH_CODE 配置
+
+### 五、常见问题解答
+
+**Q1：如何查看友链检测结果？**
+A：访问 `https://check-flink-xxx.vercel.app/result.json` 或部署的 Vercel 地址
+
+**Q2：如何只处理新增的友链？**
+A：在 `target_link` 中填写新增友链的名称或 URL 关键词
+
+**Q3：多个友链如何分隔？**
+A：使用英文逗号 `,` 分隔，如 `番茄,blog.example.com`
+
+**Q4：处理指定友链会影响其他友链吗？**
+A：不会，其他友链保留历史状态，`total_count` 不减少
+
+**Q5：如何验证截图是否成功？**
+A：查看 result.json 中的 `siteshot` 字段，或运行 `python check_siteshot.py ./result.json`
 
 ---
 
@@ -882,7 +1077,7 @@ webdriver-manager==4.0.2
 
 1. Actions → Run workflow
 2. `task` 选择 `both`（或按需选 status_only / screenshots_only）
-3. `target_link` 填写友链名称或 URL 关键词，如 `番茄` 或 `blog.example.com`
+3. `target_link` 填写友链名称或 URL 关键词，多个用逗号分隔，如 `番茄,blog.example.com`
 4. 运行
 
 **增量合并机制**：只有匹配的友链会被重新检测/截图，其余友链保留上次结果，`total_count` 不会减少。
@@ -953,7 +1148,27 @@ webdriver-manager==4.0.2
 2. 如果站点使用了新的 WAF 关键词，可在 `geo_diagnose.py` 的 `GEO_KEYWORDS_STRONG` 中添加
 3. 国内探测节点（`api.vvhan.com` 等）可能间歇性不可用，诊断会回退到策略 C
 
-### Q12: friends_watcher watch 模式不工作？
+### Q12: mshots 截图黑屏或卡住，不触发 thum.io 兜底？
+
+**A**: 这是 mshots 服务的特性问题，已通过以下方式优化：
+
+1. **缩短超时时间**：mshots 请求超时从 30 秒改为 10 秒
+2. **增加内容验证**：检查返回图片大小，小于 5KB 视为无效响应
+3. **快速降级**：无效响应立即降级到 thum.io，不再长时间等待
+
+**手动触发重新截图**：
+1. Actions → Run workflow
+2. `task` 选择 `screenshots_only`
+3. `target_link` 填写问题友链（如 `blog.astrvow.com`）
+4. 运行
+
+**验证截图状态**：
+```bash
+# 检查 result.json 中的截图状态
+python check_siteshot.py ./result.json
+```
+
+### Q13: friends_watcher watch 模式不工作？
 
 **A**: 检查依赖和环境：
 

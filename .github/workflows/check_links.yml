@@ -19,7 +19,7 @@ on:
           - both               # 状态检测 + 截图
         default: status_only
       target_link:
-        description: '只处理指定友链（填名称或URL关键词，留空=处理全部）'
+        description: '只处理指定友链（填名称或URL关键词，多个用逗号分隔，留空=处理全部）'
         required: false
         type: string
         default: ''

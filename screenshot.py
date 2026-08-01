@@ -228,21 +228,25 @@ def take_screenshot(url: str, host: str) -> str:
     except Exception as e:
         logger.warning(f"[fallback] 异常，降级到 mshots：{e}")
 
-    # 2. mshots 兜底（下载 mshots 截图后再上传到图床）
+    # 2. mshots 兜底（快速尝试，失败立即降级到 thum.io）
     try:
         mshots_url = _build_mshots_url(url)
-        logger.info(f"[mshots] 尝试通过 WordPress.com mshots 截图：{mshots_url}")
-        resp = requests.get(mshots_url, timeout=30)
-        if resp.status_code == 200:
+        logger.info(f"[mshots] 快速尝试 mshots：{mshots_url}")
+        
+        # 使用较短的超时时间，快速失败
+        resp = requests.get(mshots_url, timeout=10)
+        
+        if resp.status_code == 200 and len(resp.content) > 5120:  # 大于5KB
             delete_from_imagebed(filename)
             uploaded = upload_to_imagebed(resp.content, filename)
             if uploaded:
                 return uploaded
             logger.warning(f"[mshots] 上传失败，降级到 thum.io")
         else:
-            logger.warning(f"[mshots] HTTP {resp.status_code}，降级到 thum.io")
+            logger.warning(f"[mshots] 无效响应({resp.status_code}, {len(resp.content)}字节)，降级到 thum.io")
+            
     except Exception as e:
-        logger.warning(f"[mshots] 失败：{e}，降级到 thum.io")
+        logger.warning(f"[mshots] 快速失败：{e}，降级到 thum.io")
 
     # 3. thum.io 最终兜底（永远可用）
     return _build_thumio_url(url)
