@@ -54,9 +54,11 @@ SOURCE_URL = os.getenv("SOURCE_URL", "https://blog.liushen.fun/flink_count.json"
 RESULT_FILE = "./result.json"
 AUTHOR_URL = os.getenv("AUTHOR_URL", "blog.liushen.fun")  # 作者URL，用于检测反链
 
-# TARGET_LINK 支持 "," 分隔多目标，支持精确/子串匹配
+# TARGET_LINK 支持 "," 或 "|" 分隔多目标，支持精确/子串匹配
 _RAW_TARGET = os.getenv("TARGET_LINK", "").strip()
-TARGET_LINK_LIST: list[str] = [p.strip() for p in _RAW_TARGET.split(",") if p.strip()]
+TARGET_LINK_LIST: list[str] = [
+    p.strip() for p in _RAW_TARGET.replace(",", "|").split("|") if p.strip()
+]
 
 # 站点豁免：已知可正常访问但被 WAF/CDN 拦截（如 EdgeOne/Cloudflare）
 # 从 GitHub Actions（海外 IP）访问会被拦截，但国内用户可正常访问

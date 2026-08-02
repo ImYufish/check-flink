@@ -29,8 +29,12 @@ logger = logging.getLogger(__name__)
 RESULT_FILE = "./result.json"
 # 浏览器并发：Chrome 进程吃内存，不开太高
 SCREENSHOT_WORKERS = int(os.getenv("SCREENSHOT_WORKERS", "2"))
-# 指定只截图某个友链（名称/URL子串匹配），留空=截图全部可达友链
-TARGET_LINK = os.getenv("TARGET_LINK", "").strip()
+# 指定只截图某个/某些友链（名称/URL子串匹配），留空=截图全部可达友链
+# 支持逗号 "," 或竖线 "|" 分隔多个目标
+_RAW_TARGET = os.getenv("TARGET_LINK", "").strip()
+TARGET_LINK_LIST: list[str] = [
+    p.strip() for p in _RAW_TARGET.replace(",", "|").split("|") if p.strip()
+]
 
 
 def host_from_url(url: str) -> str:
@@ -57,12 +61,12 @@ def main():
 
     # 只对可达友链截图
     targets = [it for it in link_status if it.get("latency", -1) > 0]
-    if TARGET_LINK:
+    if TARGET_LINK_LIST:
         targets = [
             it for it in targets
-            if TARGET_LINK in it.get("name", "") or TARGET_LINK in it.get("link", "")
+            if any(t in it.get("name", "") or t in it.get("link", "") for t in TARGET_LINK_LIST)
         ]
-        logger.info(f"目标过滤 '{TARGET_LINK}'：匹配到 {len(targets)} 个可达友链")
+        logger.info(f"目标过滤 '{_RAW_TARGET}'：匹配到 {len(targets)} 个可达友链（目标: {TARGET_LINK_LIST}）")
         if not targets:
             logger.error("未匹配到任何可达友链，请检查 TARGET_LINK（或该友链不可达）")
             return
