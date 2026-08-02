@@ -257,12 +257,20 @@ def take_screenshot(url: str, host: str) -> str:
                 break
 
             content = resp.content
-            # 识别占位图：< 10KB 或包含 "Generating Preview"
-            is_placeholder = (
-                len(content) < 10240
-                or b"Generating Preview" in content
-                or b"generating preview" in content.lower()
-            )
+            content_type = (resp.headers.get("Content-Type") or "").lower()
+
+            # 识别占位图：
+            #   1) Content-Type 为 text/html（mshots 返回的"Generating Preview"页面）
+            #   2) 非 PNG 魔数（\x89PNG 开头才是有效 PNG）
+            #   3) 尺寸过小 < 10KB（兜底）
+            is_placeholder = True
+            if "image" in content_type:
+                # 明确声明为图片，可信
+                is_placeholder = False
+            elif content[:4] == b"\x89PNG":
+                # PNG 魔数校验通过，真实截图
+                is_placeholder = False
+
             if is_placeholder:
                 logger.info(
                     f"[mshots] 第 {attempt} 次拿到占位图（{len(content)} bytes），"
