@@ -228,25 +228,66 @@ def take_screenshot(url: str, host: str) -> str:
     except Exception as e:
         logger.warning(f"[fallback] 异常，降级到 mshots：{e}")
 
-    # 2. mshots 兜底（快速尝试，失败立即降级到 thum.io）
+    # 2. mshots 兜底（处理 "Generating Preview..." 占位图）
+    #    mshots 首次请求会返回 WordPress 占位图（<10KB 黑色 + Generating Preview 文字），
+    #    真实截图需要等服务器异步生成。策略：
+    #    a) 检测占位图特征（<10KB 或包含 Generating Preview 字符串）
+    #    b) 重试最多 3 次，每次间隔 5 秒，让 mshots 后台生成完成
+    #    c) 仍失败则降级到 thum.io
     try:
         mshots_url = _build_mshots_url(url)
-        logger.info(f"[mshots] 快速尝试 mshots：{mshots_url}")
-        
-        # 使用较短的超时时间，快速失败
-        resp = requests.get(mshots_url, timeout=10)
-        
-        if resp.status_code == 200 and len(resp.content) > 5120:  # 大于5KB
+        logger.info(f"[mshots] 尝试 mshots：{mshots_url}")
+
+        png_bytes = None
+        for attempt in range(1, 4):  # 最多 3 次
+            try:
+                resp = requests.get(mshots_url, timeout=20)
+            except Exception as e:
+                logger.warning(f"[mshots] 第 {attempt} 次请求异常：{e}")
+                if attempt < 3:
+                    time.sleep(5)
+                    continue
+                break
+
+            if resp.status_code != 200:
+                logger.warning(f"[mshots] 第 {attempt} 次 HTTP {resp.status_code}")
+                if attempt < 3:
+                    time.sleep(5)
+                    continue
+                break
+
+            content = resp.content
+            # 识别占位图：< 10KB 或包含 "Generating Preview"
+            is_placeholder = (
+                len(content) < 10240
+                or b"Generating Preview" in content
+                or b"generating preview" in content.lower()
+            )
+            if is_placeholder:
+                logger.info(
+                    f"[mshots] 第 {attempt} 次拿到占位图（{len(content)} bytes），"
+                    f"等待 5 秒后重试..."
+                )
+                if attempt < 3:
+                    time.sleep(5)
+                    continue
+                # 3 次都是占位图：降级到 thum.io
+                logger.warning(f"[mshots] 重试 3 次仍为占位图，降级到 thum.io")
+                break
+
+            # 拿到真实截图
+            png_bytes = content
+            logger.info(f"[mshots] 第 {attempt} 次获取真实截图（{len(content)} bytes）")
+            break
+
+        if png_bytes:
             delete_from_imagebed(filename)
-            uploaded = upload_to_imagebed(resp.content, filename)
+            uploaded = upload_to_imagebed(png_bytes, filename)
             if uploaded:
                 return uploaded
             logger.warning(f"[mshots] 上传失败，降级到 thum.io")
-        else:
-            logger.warning(f"[mshots] 无效响应({resp.status_code}, {len(resp.content)}字节)，降级到 thum.io")
-            
     except Exception as e:
-        logger.warning(f"[mshots] 快速失败：{e}，降级到 thum.io")
+        logger.warning(f"[mshots] 失败：{e}，降级到 thum.io")
 
     # 3. thum.io 最终兜底（永远可用）
     return _build_thumio_url(url)
