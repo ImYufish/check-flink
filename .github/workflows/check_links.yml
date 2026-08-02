@@ -1,4 +1,4 @@
-﻿name: Check Links and Generate JSON
+name: Check Links and Generate JSON
 
 on:
   schedule:
@@ -83,15 +83,35 @@ jobs:
         SOURCE_URL: ${{ secrets.SOURCE_URL }}
       run: |
         echo "==== 变更检测 ===="
-        echo "从 SOURCE_URL 拉取最新 friends.json..."
-        HTTP_CODE=$(curl -sL -w "%{http_code}" -o ./friends.latest.json \
-          "$SOURCE_URL" 2>/dev/null)
-        if [ "$HTTP_CODE" != "200" ] || [ ! -s ./friends.latest.json ]; then
-          echo "⚠️ 无法获取最新数据源（HTTP $HTTP_CODE），跳过变更检测，走全量检测"
-          echo "TARGET_LINK_DETECTED=" >> $GITHUB_ENV
-          exit 0
+        # 优先从 GitHub raw 拉取最新 friendsConfig.ts（绕过 Vercel 部署延迟）
+        echo "从 GitHub raw 拉取最新 friendsConfig.ts..."
+        TS_URL="https://raw.githubusercontent.com/fqzlr/fqzlr-bk/main/src/config/friendsConfig.ts"
+        HTTP_CODE=$(curl -sL -w "%{http_code}" -o ./friends.latest.ts "$TS_URL" 2>/dev/null)
+        if [ "$HTTP_CODE" = "200" ] && [ -s ./friends.latest.ts ]; then
+          echo "✅ 下载成功（$(stat -c%s ./friends.latest.ts) bytes）"
+          # 使用 friends_watcher.py 解析 TS → 生成 JSON 格式
+          if python -c "import friends_watcher" 2>/dev/null; then
+            python3 -c "import friends_watcher,json;arr=friends_watcher.parse_friends_config('friends.latest.ts');json.dump({'link_list':[{'name':it.get('title',''),'link':it.get('siteurl',''),'linkpage':it.get('linkpage')or it.get('siteurl','')} for it in arr if it.get('enabled',True)]},open('friends.latest.json','w',encoding='utf-8'),ensure_ascii=False,indent=2)"
+            echo "✅ 解析完成，生成 friends.latest.json"
+          else
+            echo "⚠️ friends_watcher 不可用，降级到 SOURCE_URL"
+            HTTP_CODE2=$(curl -sL -w "%{http_code}" -o ./friends.latest.json "$SOURCE_URL" 2>/dev/null)
+            if [ "$HTTP_CODE2" != "200" ] || [ ! -s ./friends.latest.json ]; then
+              echo "❌ SOURCE_URL 也失败（HTTP $HTTP_CODE2），跳过变更检测"
+              echo "TARGET_LINK_DETECTED=" >> $GITHUB_ENV
+              exit 0
+            fi
+          fi
+        else
+          echo "⚠️ GitHub raw 不可用（HTTP $HTTP_CODE），降级到 SOURCE_URL..."
+          HTTP_CODE2=$(curl -sL -w "%{http_code}" -o ./friends.latest.json "$SOURCE_URL" 2>/dev/null)
+          if [ "$HTTP_CODE2" != "200" ] || [ ! -s ./friends.latest.json ]; then
+            echo "❌ SOURCE_URL 也失败（HTTP $HTTP_CODE2），跳过变更检测，走全量检测"
+            echo "TARGET_LINK_DETECTED=" >> $GITHUB_ENV
+            exit 0
+          fi
+          echo "✅ SOURCE_URL 下载成功（$(stat -c%s ./friends.latest.json) bytes）"
         fi
-        echo "✅ 下载成功（$(stat -c%s ./friends.latest.json) bytes）"
         echo "对比 result.json 检测变更..."
         if [ -f ./result.json ] && [ -s ./result.json ]; then
           # 优先使用 friends_watcher.py compare（如果可用）
@@ -114,7 +134,7 @@ jobs:
           echo "result.json 不存在或为空，首次运行，走全量检测"
           echo "TARGET_LINK_DETECTED=" >> $GITHUB_ENV
         fi
-        rm -f ./friends.latest.json
+        rm -f ./friends.latest.json ./friends.latest.ts
 
     - name: Run Python script to check frined-links
       env:
