@@ -162,7 +162,12 @@ def _take_screenshot_with_selenium(url: str, host: str) -> Optional[bytes]:
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
+    # WebGL 软件渲染（Spline/Live2D 等 WebGL 内容在 headless 下默认不渲染，产生黑块）
+    # 新版 Chrome 需要 --enable-unsafe-swiftshader 才允许软件 WebGL
+    options.add_argument("--use-gl=angle")
+    options.add_argument("--use-angle=swiftshader")
+    options.add_argument("--enable-unsafe-swiftshader")
+    options.add_argument("--ignore-gpu-blocklist")
     options.add_argument("--disable-extensions")
     options.add_argument("--disable-software-rasterizer")
     options.add_argument(f"--window-size={WINDOW_WIDTH},{WINDOW_HEIGHT}")
