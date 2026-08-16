@@ -8,7 +8,7 @@ import requests
 import warnings
 from queue import Queue
 from datetime import datetime
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 import concurrent.futures
 from typing import Optional, Tuple, Any
 
@@ -375,7 +375,7 @@ def handle_api_requests(session) -> list:
         time.sleep(0.2)
         item = api_request_queue.get()
         link = item['link']
-        api_url = f"https://v2.xxapi.cn/api/status?url={link}"
+        api_url = f"https://v2.xxapi.cn/api/status?url={quote(link, safe='')}"
         try:
             response, latency = request_url(session, api_url, headers=RAW_HEADERS, desc="API 检查", timeout=30)
         except Exception as e:
@@ -409,7 +409,9 @@ def handle_api_requests(session) -> list:
 
 
 def main():
+    session = None
     try:
+        session = requests.Session()
         link_list = fetch_origin_data(SOURCE_URL)
         if not link_list:
             logging.error("数据源为空或解析失败")
@@ -427,19 +429,19 @@ def main():
         else:
             check_list = link_list
 
-        with requests.Session() as session:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-                results = list(executor.map(lambda item: check_link(item, session), check_list))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            # 每个 worker 各自用独立 Session，避免多线程共享同一个 Session（非线程安全）
+            results = list(executor.map(lambda item: check_link(item, requests.Session()), check_list))
 
-            updated_api_results = handle_api_requests(session)
-            # updated_api_results 元素: (item, latency, has_author, last_resp, last_err)
-            for updated_item in updated_api_results:
-                for idx, (item, latency, has_author, *_rest) in enumerate(results):
-                    if item['link'] == updated_item[0]['link']:
-                        results[idx] = updated_item
-                        break
+        # 诊断与补充 API 检查用主 session（单线程调用，安全）
+        updated_api_results = handle_api_requests(session)
+        # updated_api_results 元素: (item, latency, has_author, last_resp, last_err)
+        for updated_item in updated_api_results:
+            for idx, (item, latency, has_author, *_rest) in enumerate(results):
+                if item['link'] == updated_item[0]['link']:
+                    results[idx] = updated_item
+                    break
 
-        current_links = {item['link'] for item in link_list}
         link_status = []
 
         # 【修复 siteshot 丢失 #1】预构建历史多键索引，代替原先的单键精确匹配
@@ -621,6 +623,9 @@ def main():
         logging.info(f"结果已保存至: {RESULT_FILE}")
     except Exception as e:
         logging.exception(f"运行主程序失败: {e}")
+    finally:
+        if session is not None:
+            session.close()
 
 if __name__ == "__main__":
     main()
