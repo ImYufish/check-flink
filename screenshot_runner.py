@@ -17,7 +17,7 @@ import logging
 import concurrent.futures
 from urllib.parse import urlparse
 
-from screenshot import take_screenshot
+from screenshot import take_screenshot, resolve_driver_path
 
 logging.basicConfig(
     level=logging.INFO,
@@ -72,11 +72,23 @@ def main():
             return
     logger.info(f"开始截图，共 {len(targets)} 个可达友链，并发数 {SCREENSHOT_WORKERS}")
 
+    # 线程池启动前，单线程预解析 chromedriver 路径一次。
+    # 避免并发场景下 webdriver_manager 争抢驱动缓存触发
+    # "tuple index out of range" 导致部分友链截图失败（博客 cuteleaf 案例）。
+    try:
+        driver_path = resolve_driver_path()
+        logger.info(f"chromedriver 路径已预解析：{driver_path}")
+    except Exception as e:
+        logger.warning(f"[driver] 预解析失败，worker 将各自回退解析：{e}")
+        driver_path = None
+
     success = 0
     failed = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=SCREENSHOT_WORKERS) as executor:
         future_to_item = {
-            executor.submit(take_screenshot, item["link"], host_from_url(item["link"])): item
+            executor.submit(
+                take_screenshot, item["link"], host_from_url(item["link"]), driver_path
+            ): item
             for item in targets
         }
         for future in concurrent.futures.as_completed(future_to_item):
