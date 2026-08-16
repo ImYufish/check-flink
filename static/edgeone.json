@@ -1,7 +1,7 @@
 {
   "headers": [
     {
-      "source": "/*",
+      "source": "/result.json",
       "headers": [
         {
           "key": "Access-Control-Allow-Origin",
@@ -9,17 +9,12 @@
         },
         {
           "key": "Access-Control-Allow-Methods",
-          "value": "GET, POST, OPTIONS, PUT, DELETE"
+          "value": "GET, OPTIONS"
         },
         {
           "key": "Access-Control-Allow-Headers",
           "value": "*"
-        }
-      ]
-    },
-    {
-      "source": "/result.json",
-      "headers": [
+        },
         {
           "key": "Cache-Control",
           "value": "no-cache, no-store, must-revalidate"
