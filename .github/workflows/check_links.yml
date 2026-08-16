@@ -137,6 +137,8 @@ jobs:
         rm -f ./friends.latest.json ./friends.latest.ts
 
     - name: Run Python script to check frined-links
+      # screenshots_only 模式：只截图不检测，跳过 Python，避免覆盖 result.json 里已有的状态
+      if: ${{ inputs.task != 'screenshots_only' }}
       env:
         PROXY_URL: ${{ secrets.PROXY_URL }}
         SOURCE_URL: ${{ secrets.SOURCE_URL }}
@@ -295,9 +297,11 @@ jobs:
   take_screenshots:
     name: 截取友链主页截图
     runs-on: ubuntu-latest
-    # 关键改动：删除 needs: [check_links]，让此 job 完全独立
-    # 数据从 page 分支 curl 拉取，不依赖 check_links 的 artifact
-    # 仅在【每 6 天定时】或【手动选择 screenshots_only / both】时执行
+    # 加回 needs: [check_links]：截图 job 等状态检测 job 跑完并 push result.json 后再执行，
+    # 避免「both / screenshots_only 手动」两个 job 并发强推 page 分支、互相覆盖丢数据。
+    # check_links 的 if 恒为 true，定时（每日/每6天）与手动各场景它都会先跑，
+    # 所以这里依赖它既能消除竞态、又不破坏定时截图。
+    needs: [check_links]
     if: ${{ (github.event_name == 'schedule' && github.event.schedule == '30 1 1,7,13,19,25 * *') || (github.event_name == 'workflow_dispatch' && (inputs.task == 'screenshots_only' || inputs.task == 'both')) }}
     steps:
     - name: Pull latest repository
