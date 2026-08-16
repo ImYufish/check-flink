@@ -72,9 +72,9 @@ def main():
             return
     logger.info(f"开始截图，共 {len(targets)} 个可达友链，并发数 {SCREENSHOT_WORKERS}")
 
-    # 线程池启动前，单线程预解析 chromedriver 路径一次。
-    # 避免并发场景下 webdriver_manager 争抢驱动缓存触发
-    # "tuple index out of range" 导致部分友链截图失败（博客 cuteleaf 案例）。
+    # 先把 chromedriver 单独装好，再开线程池。
+    # 之前每个线程各装各的，驱动没缓存时会抢缓存目录、
+    # 崩在 tuple index out of range，导致个别友链截图失败掉回 thum.io。
     try:
         driver_path = resolve_driver_path()
         logger.info(f"chromedriver 路径已预解析：{driver_path}")

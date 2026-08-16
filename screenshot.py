@@ -146,12 +146,12 @@ def upload_to_imagebed(image_bytes: bytes, filename: str) -> Optional[str]:
 
 def resolve_driver_path() -> str:
     """
-    单线程预解析 chromedriver 路径。
+    截图会开多个线程一起跑，每个线程原本都要自己装一遍 chromedriver。
+    驱动还没缓存的时候，几个线程同时去下载、抢 webdriver_manager 的缓存目录，
+    就会偶发崩在 tuple index out of range，导致那一轮截图掉回 thum.io 兜底。
 
-    背景：ThreadPoolExecutor 并发截图时，每个 worker 若各自调用
-    ChromeDriverManager().install()，首次（驱动未缓存）会因并发下载/版本解析
-    触发 webdriver_manager 的 race（表现为 tuple index out of range）。
-    故改为在「线程池启动前」单线程调用一次，拿到路径后所有 worker 直接复用。
+    所以这里先单独（单线程）把 chromedriver 装好、把路径拿到手，
+    后面所有线程直接用这个现成路径，不再各自去装。
     """
     from selenium.webdriver.chrome.service import Service
     from webdriver_manager.chrome import ChromeDriverManager
