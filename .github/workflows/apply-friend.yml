@@ -62,6 +62,35 @@ jobs:
               return false;
             }
 
+            // 可访问性检测：站点须可正常访问（2xx/3xx），失败自动重试，最多 3 次尝试
+            async function checkReachable(url, maxAttempts) {
+              let lastStatus = 0, lastErr = "";
+              for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                try {
+                  const resp = await fetch(url, {
+                    method: "GET",
+                    redirect: "follow",
+                    headers: { "User-Agent": "Mozilla/5.0 (compatible; FriendLinkBot/1.0)" },
+                  });
+                  lastStatus = resp.status;
+                  if (resp.status >= 200 && resp.status < 400) return { ok: true, status: resp.status };
+                  // 5xx 视为临时故障，重试；4xx 视为永久失败，不重试
+                  if (resp.status >= 500 && attempt < maxAttempts) {
+                    await new Promise((r) => setTimeout(r, 2000));
+                    continue;
+                  }
+                  return { ok: false, status: resp.status };
+                } catch (e) {
+                  lastErr = e.message;
+                  if (attempt < maxAttempts) {
+                    await new Promise((r) => setTimeout(r, 2000));
+                    continue;
+                  }
+                }
+              }
+              return { ok: false, status: lastStatus, err: lastErr };
+            }
+
             const title   = field("网站名称").replace(/\s+/g, " ").trim();
             const siteurl = field("网站链接").trim();
             const linkpage = field("友链页面 URL").trim();
@@ -87,6 +116,17 @@ jobs:
             let finalSiteurl = siteurl;
             if (!/^https?:\/\//i.test(finalSiteurl)) {
               finalSiteurl = "https://" + finalSiteurl.replace(/^\/+/, "");
+            }
+
+            // 可访问性硬门槛：站点须可正常访问，失败重试最多 3 次
+            const reach = await checkReachable(finalSiteurl, 3);
+            if (!reach.ok) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number,
+                body: "⚠️ **站点不可访问**：`" + finalSiteurl + "` 经最多 3 次尝试仍无法访问（" + (reach.err ? "错误：" + reach.err : "HTTP " + reach.status) + "）。请确认站点能正常打开后再申请。关闭本 Issue 后重新打开即可重试。",
+              });
+              await github.rest.issues.update({ owner, repo, issue_number, state: "closed" });
+              return;
             }
 
             // 反链硬门槛：申请人须在其友链页(或首页)链回本站，否则拒绝
@@ -177,6 +217,6 @@ jobs:
 
             await github.rest.issues.createComment({
               owner, repo, issue_number,
-              body: "✅ 反链核验通过，已自动添加友链 **" + title + "**（" + finalSiteurl + "）。\n\n已触发 `check_links` 重新部署，`friends.yufish.cn/friends.json` 预计几分钟内更新；博客页面加载时会直接读取最新清单（无需重新构建博客）。",
+              body: "✅ 反链核验与可访问性检查均通过，已自动添加友链 **" + title + "**（" + finalSiteurl + "）。\n\n已触发 `check_links` 重新部署，`friends.yufish.cn/friends.json` 预计几分钟内更新；博客页面加载时会直接读取最新清单（无需重新构建博客）。",
             });
             await github.rest.issues.update({ owner, repo, issue_number, state: "closed" });
