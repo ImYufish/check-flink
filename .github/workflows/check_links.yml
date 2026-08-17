@@ -33,6 +33,11 @@ jobs:
     runs-on: ubuntu-latest
     # 始终运行状态检测（保证 result.json 总是最新，截图任务有数据可读；screenshots_only 模式也跑一次轻量级检测）
     if: ${{ true }}
+    # 巡检异常回评 Issue 需要 issues:write；push page 分支需要 contents:write；cache/artifact 需要 actions
+    permissions:
+      contents: write
+      issues: write
+      actions: write
     steps:
     - name: Pull latest repository
       uses: actions/checkout@v4
@@ -221,6 +226,92 @@ jobs:
             json.dump(T,f,ensure_ascii=False,indent=4)
         PY
         python check_siteshot.py ./result.json
+
+    - name: 巡检异常回评对应 Issue（按 issue_id）
+      # screenshots_only 模式不重跑检测，link_status 是旧数据，跳过避免误报
+      if: ${{ inputs.task != 'screenshots_only' }}
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const { owner, repo } = context.repo;
+          const norm = (u) => (u || '').trim().toLowerCase().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+
+          // 1) 读取巡检结果
+          let result;
+          try {
+            result = JSON.parse(fs.readFileSync('./result.json', 'utf8'));
+          } catch (e) {
+            core.warning('读取 result.json 失败: ' + e.message);
+            return;
+          }
+          const statuses = result.link_status || [];
+          if (statuses.length === 0) {
+            console.log('无 link_status 数据，跳过回评');
+            return;
+          }
+
+          // 2) 取 issue_id 映射（siteurl -> issue_id）
+          const issueMap = {};
+          try {
+            const fd = await github.rest.repos.getContent({ owner, repo, path: 'static/friends.json', ref: 'main' });
+            const friends = JSON.parse(Buffer.from(fd.data.content, 'base64').toString('utf8')).friends || [];
+            for (const f of friends) {
+              if (f.siteurl && f.issue_id) issueMap[norm(f.siteurl)] = f.issue_id;
+            }
+          } catch (e) {
+            core.warning('读取 friends.json 失败: ' + e.message);
+            return;
+          }
+
+          // 3) 异常检测：评论 + 打 needs-update（仅首次，避免每日刷屏）
+          const anomalyIds = new Set();
+          for (const s of statuses) {
+            const id = issueMap[norm(s.link || '')];
+            if (!id) continue; // 旧友链无 issue_id 的，跳过 Issue 通知（异常仍记录于 result.json）
+            const isAnomaly = (s.status && s.status !== 'ok') || (s.has_author_link === false);
+            if (!isAnomaly) continue;
+            anomalyIds.add(id);
+
+            const iss = await github.rest.issues.get({ owner, repo, issue_number: id });
+            const labels = (iss.data.labels || []).map((l) => l.name);
+            if (labels.includes('needs-update')) {
+              console.log('Issue #' + id + ' 已带 needs-update，跳过重复评论');
+              continue;
+            }
+
+            let reason = '未知异常';
+            if (s.status === 'error') reason = '站点不可访问（连接/请求错误）';
+            else if (s.status === 'geo_blocked') reason = '疑似地域拦截（geo_blocked）' + (s.geo_hint ? '：' + s.geo_hint : '');
+            else if (s.status === 'unknown') reason = '状态未知（无法判定）';
+            else if (s.status && s.status !== 'ok') reason = '站点异常（status=' + s.status + '）';
+            if (s.has_author_link === false) reason += '；未检测到指向本站的真实友链';
+
+            await github.rest.issues.createComment({
+              owner, repo, issue_number: id,
+              body: '⚠️ **每日巡检异常**：' + reason + '。\n\n请检查该友链，修复后在本 Issue 下回复任意内容即可重新验证（Issue 保持开放）。',
+            });
+            await github.rest.issues.addLabels({ owner, repo, issue_number: id, labels: ['needs-update'] });
+            console.log('已对 Issue #' + id + ' 评论异常并打 needs-update');
+          }
+
+          // 4) 恢复检测：带 needs-update 且当前正常的友链，移除标签 + 评论已恢复
+          for (const id of new Set(Object.values(issueMap))) {
+            if (anomalyIds.has(id)) continue;
+            try {
+              const iss = await github.rest.issues.get({ owner, repo, issue_number: id });
+              const labels = (iss.data.labels || []).map((l) => l.name);
+              if (!labels.includes('needs-update')) continue;
+              await github.rest.issues.removeLabel({ owner, repo, issue_number: id, name: 'needs-update' }).catch(() => {});
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: id,
+                body: '✅ **巡检已恢复正常**：当前状态 ok 且已检测到指向本站的真实友链，已移除 `needs-update` 标签。',
+              });
+              console.log('Issue #' + id + ' 已恢复正常，移除 needs-update');
+            } catch (e) {
+              core.warning('处理恢复通知失败 (Issue #' + id + '): ' + e.message);
+            }
+          }
 
     - name: Incremental screenshot (only when changes detected)
       if: ${{ inputs.task != 'screenshots_only' }}
