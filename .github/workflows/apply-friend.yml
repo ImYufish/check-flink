@@ -15,16 +15,16 @@ jobs:
   apply:
     name: 解析 / Playwright 验证 / 写入友链
     runs-on: ubuntu-latest
-    # 触发条件：
-    #  - issues opened/reopened 且带「友链申请」标签（或标题前缀）
-    #  - issue_comment created 且 Issue 同时带「友链申请」「needs-update」标签、且评论者不是机器人（回复即重验）
+    # 触发条件（不依赖 labels.*.name 表达式，改用标题前缀，避免「重验被跳过」）：
+    #  - issues opened/reopened 且标题前缀 [友链申请]
+    #  - issue_comment created 且评论者不是机器人、标题前缀 [友链申请]
+    #  「是否失败态(needs-update)」的闸门放在解析步骤用 API 可靠读取（见下方 reverify 闸门）
     if: >-
       (github.event_name == 'issues' &&
-        (contains(github.event.issue.labels.*.name, '友链申请') || startsWith(github.event.issue.title, '[友链申请]'))) ||
+        startsWith(github.event.issue.title, '[友链申请]')) ||
       (github.event_name == 'issue_comment' &&
-        contains(github.event.issue.labels.*.name, '友链申请') &&
-        contains(github.event.issue.labels.*.name, 'needs-update') &&
-        github.event.comment.user.login != 'github-actions[bot]')
+        github.event.comment.user.login != 'github-actions[bot]' &&
+        startsWith(github.event.issue.title, '[友链申请]'))
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -56,6 +56,26 @@ jobs:
             const issue = (eventName === 'issue_comment') ? github.event.issue : context.payload.issue;
             const body = issue.body || "";
 
+            // 重验闸门：仅「失败态(Issue 带 needs-update 标签)」的评论才重验；
+            // 已通过/已关闭 Issue 的评论直接忽略（用 API 读取 labels，比 if 里的 labels.*.name 表达式可靠）
+            if (isReverify) {
+              const lbls = (issue.labels || []).map((l) => l.name);
+              if (!lbls.includes('needs-update')) {
+                core.setOutput('shouldVerify', 'false');
+                return;
+              }
+            }
+
+            // 清洗用户粘贴的 URL：去掉 markdown 链接语法、首尾空白、尾部标点/右括号
+            function cleanUrl(raw) {
+              const s = (raw || '').trim();
+              const md = s.match(/\[[^\]]*\]\(\s*(https?:\/\/[^\s)]+)\s*\)/i);
+              if (md) return md[1];
+              const m = s.match(/https?:\/\/[^\s)]+/i);
+              if (m) return m[0];
+              return s;
+            }
+
             // 从 Issue Forms 渲染后的 body 中按中文标签提取字段
             function field(label) {
               const re = new RegExp("###\\s*" + label + "\\s*\\n+([\\s\\S]*?)(?=\\n###|$)");
@@ -64,8 +84,8 @@ jobs:
             }
 
             const title   = field("网站名称").replace(/\s+/g, " ").trim();
-            const siteurl = field("网站链接").trim();
-            const linkpage = field("友链页面 URL").trim();
+            const siteurl = cleanUrl(field("网站链接"));
+            const linkpage = cleanUrl(field("友链页面 URL"));
             const desc    = field("网站描述").trim();
             const imgurl  = field("网站头像 URL").trim();
 
