@@ -7,6 +7,7 @@ on:
 permissions:
   issues: write
   contents: write
+  actions: write
 
 jobs:
   apply:
@@ -115,8 +116,19 @@ jobs:
               branch: defaultBranch,
             });
 
+            // 立即触发 check_links 重新部署，让 friends.json 几分钟内上线（无需等定时巡检）
+            try {
+              await github.rest.actions.createWorkflowDispatch({
+                owner, repo,
+                workflow_id: "check_links.yml",
+                ref: defaultBranch,
+              });
+            } catch (e) {
+              core.warning("触发 check_links 重新部署失败（可手动在 Actions 页面 Run workflow）: " + e.message);
+            }
+
             await github.rest.issues.createComment({
               owner, repo, issue_number,
-              body: "✅ 已自动添加友链 **" + title + "**（" + finalSiteurl + "）。\n\n下次 `check_links` 巡检会把 `static/` 强推到 page 分支，博客即可在 `friends.yufish.cn/friends.json` 读到；在此之前博客会回退到本地 `friendsConfig.ts` 兜底。",
+              body: "✅ 已自动添加友链 **" + title + "**（" + finalSiteurl + "）。\n\n已触发 `check_links` 重新部署，`friends.yufish.cn/friends.json` 预计几分钟内更新；博客页面加载时会直接读取最新清单（无需重新构建博客）。",
             });
             await github.rest.issues.update({ owner, repo, issue_number, state: "closed" });
