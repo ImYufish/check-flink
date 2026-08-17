@@ -264,7 +264,7 @@ jobs:
             return;
           }
 
-          // 3) 异常检测：评论 + 打 needs-update（仅首次，避免每日刷屏）
+          // 3) 异常检测：评论 + 打 待更新（仅首次，避免每日刷屏）
           const anomalyIds = new Set();
           for (const s of statuses) {
             const id = issueMap[norm(s.link || '')];
@@ -275,8 +275,8 @@ jobs:
 
             const iss = await github.rest.issues.get({ owner, repo, issue_number: id });
             const labels = (iss.data.labels || []).map((l) => l.name);
-            if (labels.includes('needs-update')) {
-              console.log('Issue #' + id + ' 已带 needs-update，跳过重复评论');
+            if (labels.includes('待更新')) {
+              console.log('Issue #' + id + ' 已带 待更新，跳过重复评论');
               continue;
             }
 
@@ -291,23 +291,23 @@ jobs:
               owner, repo, issue_number: id,
               body: '⚠️ **每日巡检异常**：' + reason + '。\n\n请检查该友链，修复后在本 Issue 下回复任意内容即可重新验证（Issue 保持开放）。',
             });
-            await github.rest.issues.addLabels({ owner, repo, issue_number: id, labels: ['needs-update'] });
-            console.log('已对 Issue #' + id + ' 评论异常并打 needs-update');
+            await github.rest.issues.addLabels({ owner, repo, issue_number: id, labels: ['待更新'] });
+            console.log('已对 Issue #' + id + ' 评论异常并打 待更新');
           }
 
-          // 4) 恢复检测：带 needs-update 且当前正常的友链，移除标签 + 评论已恢复
+          // 4) 恢复检测：带 待更新 且当前正常的友链，移除标签 + 评论已恢复
           for (const id of new Set(Object.values(issueMap))) {
             if (anomalyIds.has(id)) continue;
             try {
               const iss = await github.rest.issues.get({ owner, repo, issue_number: id });
               const labels = (iss.data.labels || []).map((l) => l.name);
-              if (!labels.includes('needs-update')) continue;
-              await github.rest.issues.removeLabel({ owner, repo, issue_number: id, name: 'needs-update' }).catch(() => {});
+              if (!labels.includes('待更新')) continue;
+              await github.rest.issues.removeLabel({ owner, repo, issue_number: id, name: '待更新' }).catch(() => {});
               await github.rest.issues.createComment({
                 owner, repo, issue_number: id,
-                body: '✅ **巡检已恢复正常**：当前状态 ok 且已检测到指向本站的真实友链，已移除 `needs-update` 标签。',
+                body: '✅ **巡检已恢复正常**：当前状态 ok 且已检测到指向本站的真实友链，已移除 `待更新` 标签。',
               });
-              console.log('Issue #' + id + ' 已恢复正常，移除 needs-update');
+              console.log('Issue #' + id + ' 已恢复正常，移除 待更新');
             } catch (e) {
               core.warning('处理恢复通知失败 (Issue #' + id + '): ' + e.message);
             }

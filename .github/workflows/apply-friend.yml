@@ -18,7 +18,7 @@ jobs:
     # 触发条件（不依赖 labels.*.name 表达式，改用标题前缀，避免「重验被跳过」）：
     #  - issues opened/reopened 且标题前缀 [友链申请]
     #  - issue_comment created 且评论者不是机器人、标题前缀 [友链申请]
-    #  「是否失败态(needs-update)」的闸门放在解析步骤用 API 可靠读取（见下方 reverify 闸门）
+    #  「是否失败态(待更新)」的闸门放在解析步骤用 API 可靠读取（见下方 reverify 闸门）
     if: >-
       (github.event_name == 'issues' &&
         startsWith(github.event.issue.title, '[友链申请]')) ||
@@ -56,11 +56,11 @@ jobs:
             const issue = (eventName === 'issue_comment') ? github.event.issue : context.payload.issue;
             const body = issue.body || "";
 
-            // 重验闸门：仅「失败态(Issue 带 needs-update 标签)」的评论才重验；
+            // 重验闸门：仅「失败态(Issue 带 待更新 标签)」的评论才重验；
             // 已通过/已关闭 Issue 的评论直接忽略（用 API 读取 labels，比 if 里的 labels.*.name 表达式可靠）
             if (isReverify) {
               const lbls = (issue.labels || []).map((l) => l.name);
-              if (!lbls.includes('needs-update')) {
+              if (!lbls.includes('待更新')) {
                 core.setOutput('shouldVerify', 'false');
                 return;
               }
@@ -100,7 +100,7 @@ jobs:
                 owner, repo, issue_number,
                 body: "⚠️ 申请信息不完整，缺少：" + missing.join("、") + "。请补充后在本 Issue 下回复以重新验证（Issue 保持开放）。",
               });
-              await github.rest.issues.addLabels({ owner, repo, issue_number, labels: ["needs-update"] });
+              await github.rest.issues.addLabels({ owner, repo, issue_number, labels: ["待更新"] });
               core.setOutput('shouldVerify', 'false');
               return;
             }
@@ -179,7 +179,7 @@ jobs:
                 owner, repo, issue_number,
                 body: "⚠️ **验证未通过**：" + reason + "。\n\n请修复后在本 Issue 下回复任意内容即可重新验证（Issue 保持开放）。",
               });
-              await github.rest.issues.addLabels({ owner, repo, issue_number, labels: ["needs-update"] });
+              await github.rest.issues.addLabels({ owner, repo, issue_number, labels: ["待更新"] });
               // 保持开放，不关闭
               return;
             }
@@ -216,11 +216,11 @@ jobs:
               });
             }
 
-            // 评论 + 关闭 + 移除 needs-update 标签
+            // 评论 + 关闭 + 移除 待更新 标签
             const iss = await github.rest.issues.get({ owner, repo, issue_number });
             const labels = (iss.data.labels || []).map((l) => l.name);
-            if (labels.includes("needs-update")) {
-              await github.rest.issues.removeLabel({ owner, repo, issue_number, name: "needs-update" }).catch(() => {});
+            if (labels.includes("待更新")) {
+              await github.rest.issues.removeLabel({ owner, repo, issue_number, name: "待更新" }).catch(() => {});
             }
             await github.rest.issues.createComment({
               owner, repo, issue_number,
