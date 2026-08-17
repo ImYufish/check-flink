@@ -8,6 +8,9 @@ friends.json
 friends_snapshot.json
 _debug_repaired.json
 
+# 例外：static/friends.json 是友链远程清单真源，必须提交（与上面的 friends.json 区分）
+!static/friends.json
+
 # 运行产物（不提交，CI 重新生成）
 result.json
 result.baseline.json

@@ -1,0 +1,49 @@
+name: 友链申请
+description: 提交友链申请，审核通过后自动加入友链列表
+title: "[友链申请] "
+labels: ["友链申请"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢申请友链！填写以下信息后提交，机器人会自动把你的站点加入友链清单（无需人工审核）。
+  - type: input
+    id: title
+    attributes:
+      label: 网站名称
+      description: 你的站点名称
+      placeholder: 例如 临渊羡鱼
+    validations:
+      required: true
+  - type: input
+    id: siteurl
+    attributes:
+      label: 网站链接
+      description: 你的站点首页 URL（含 https://）
+      placeholder: https://example.com
+    validations:
+      required: true
+  - type: input
+    id: linkpage
+    attributes:
+      label: 友链页面 URL
+      description: 你站点上的友链页面，便于互链检测（选填）
+      placeholder: https://example.com/friends/
+    validations:
+      required: false
+  - type: input
+    id: desc
+    attributes:
+      label: 网站描述
+      description: 一句话介绍你的站点
+      placeholder: 分享生活与技术
+    validations:
+      required: true
+  - type: input
+    id: imgurl
+    attributes:
+      label: 网站头像 URL
+      description: 头像图片地址
+      placeholder: https://example.com/avatar.png
+    validations:
+      required: true

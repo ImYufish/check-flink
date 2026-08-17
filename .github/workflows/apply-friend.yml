@@ -1,0 +1,122 @@
+name: Apply Friend Link
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+  contents: write
+
+jobs:
+  apply:
+    name: 解析 Issue 并写入友链清单
+    runs-on: ubuntu-latest
+    # 仅处理带「友链申请」标签、或标题以 [友链申请] 开头的 issue
+    if: >-
+      contains(github.event.issue.labels.*.name, '友链申请') ||
+      startsWith(github.event.issue.title, '[友链申请]')
+    steps:
+      - name: 解析并写入
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const issue = context.payload.issue;
+            const body = issue.body || "";
+
+            // 从 Issue Forms 渲染后的 body 中按中文标签提取字段
+            function field(label) {
+              const re = new RegExp("###\\s*" + label + "\\s*\\n+([\\s\\S]*?)(?=\\n###|$)");
+              const m = body.match(re);
+              return m ? m[1].trim() : "";
+            }
+
+            const title   = field("网站名称").replace(/\s+/g, " ").trim();
+            const siteurl = field("网站链接").trim();
+            const linkpage = field("友链页面 URL").trim();
+            const desc    = field("网站描述").trim();
+            const imgurl  = field("网站头像 URL").trim();
+
+            const missing = [];
+            if (!title)   missing.push("网站名称");
+            if (!siteurl) missing.push("网站链接");
+            if (!desc)    missing.push("网站描述");
+            if (!imgurl)  missing.push("网站头像 URL");
+
+            if (missing.length > 0) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number,
+                body: "⚠️ 申请信息不完整，缺少：" + missing.join("、") + "。请补充后重新提交。",
+              });
+              core.warning("缺少字段：" + missing.join("、"));
+              return;
+            }
+
+            // 规范化 siteurl：补 https:// 前缀（若缺失）
+            let finalSiteurl = siteurl;
+            if (!/^https?:\/\//i.test(finalSiteurl)) {
+              finalSiteurl = "https://" + finalSiteurl.replace(/^\/+/, "");
+            }
+
+            const repoInfo = await github.rest.repos.get({ owner, repo });
+            const defaultBranch = repoInfo.data.default_branch || "main";
+            const filePath = "static/friends.json";
+
+            // 读取现有清单
+            let fileData;
+            try {
+              fileData = await github.rest.repos.getContent({
+                owner, repo, path: filePath, ref: defaultBranch,
+              });
+            } catch (e) {
+              core.setFailed("读取 " + filePath + " 失败：" + e.message);
+              return;
+            }
+
+            const content = Buffer.from(fileData.data.content, "base64").toString("utf8");
+            const json = JSON.parse(content);
+            if (!Array.isArray(json.friends)) json.friends = [];
+
+            // 去重：同一 siteurl 已存在则跳过
+            const norm = (u) => (u || "").trim().toLowerCase().replace(/^https?:\/\//i, "").replace(/\/$/, "");
+            const exists = json.friends.some((f) => norm(f.siteurl) === norm(finalSiteurl));
+            if (exists) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number,
+                body: "ℹ️ 友链 **" + title + "**（" + finalSiteurl + "）已存在，无需重复添加。",
+              });
+              await github.rest.issues.update({ owner, repo, issue_number, state: "closed" });
+              return;
+            }
+
+            const newFriend = {
+              title: title,
+              imgurl: imgurl,
+              desc: desc,
+              siteurl: finalSiteurl,
+              tags: ["Blog"],
+              weight: 5,
+              enabled: true,
+            };
+            if (linkpage) newFriend.linkpage = linkpage;
+
+            json.friends.push(newFriend);
+            json.updatedAt = new Date().toISOString().slice(0, 10);
+
+            const newContent = JSON.stringify(json, null, 2);
+
+            await github.rest.repos.createOrUpdateFileContents({
+              owner, repo, path: filePath,
+              message: "💛 新增友链：" + title,
+              content: Buffer.from(newContent, "utf8").toString("base64"),
+              sha: fileData.data.sha,
+              branch: defaultBranch,
+            });
+
+            await github.rest.issues.createComment({
+              owner, repo, issue_number,
+              body: "✅ 已自动添加友链 **" + title + "**（" + finalSiteurl + "）。\n\n下次 `check_links` 巡检会把 `static/` 强推到 page 分支，博客即可在 `friends.yufish.cn/friends.json` 读到；在此之前博客会回退到本地 `friendsConfig.ts` 兜底。",
+            });
+            await github.rest.issues.update({ owner, repo, issue_number, state: "closed" });
