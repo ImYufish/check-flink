@@ -86,7 +86,15 @@ jobs:
         # 优先从 GitHub raw 拉取最新 friendsConfig.ts（绕过 Vercel 部署延迟）
         echo "从 GitHub raw 拉取最新 friendsConfig.ts..."
         TS_URL="https://raw.githubusercontent.com/fqzlr/fqzlr-bk/main/src/config/friendsConfig.ts"
-        HTTP_CODE=$(curl -sL -w "%{http_code}" -o ./friends.latest.ts "$TS_URL" 2>/dev/null)
+        HTTP_CODE=000
+        for i in 1 2 3; do
+          HTTP_CODE=$(curl -sL -w "%{http_code}" -o ./friends.latest.ts "$TS_URL" 2>/dev/null)
+          if [ "$HTTP_CODE" = "200" ] && [ -s ./friends.latest.ts ]; then
+            break
+          fi
+          echo "第 $i 次从 GitHub raw 拉取失败（HTTP $HTTP_CODE），${i}<3 时 2 秒后重试..."
+          [ "$i" -lt 3 ] && sleep 2
+        done
         if [ "$HTTP_CODE" = "200" ] && [ -s ./friends.latest.ts ]; then
           echo "✅ 下载成功（$(stat -c%s ./friends.latest.ts) bytes）"
           # 使用 friends_watcher.py 解析 TS → 生成 JSON 格式

@@ -250,11 +250,86 @@ def is_url(path):
     return urlparse(path).scheme in ("http", "https")
 
 
+def _page_has_author_link(content, bare, domain_variants, page_url):
+    """在给定 HTML 文本中判定是否包含指向作者域名的真实链接。
+
+    同时支持：
+      - 普通 <a href>
+      - data-url / data-link / data-href 自定义属性
+      - 跳转/短链型 href 内嵌的完整 URL（如 /go?url=https://x1anyu.cn、
+        /redirect?target=x1anyu.cn），需把内嵌 URL 也抽取出来一并比对主机名
+    """
+    candidates = []
+    for m in re.finditer(
+        r'(?:href|data-url|data-link|data-href)\s*=\s*["\']([^"\']+)["\']',
+        content,
+        re.IGNORECASE,
+    ):
+        candidates.append(m.group(1))
+    # 从候选里再抽取任何内嵌的完整 URL（跳转型），展开后一并判定
+    expanded = list(candidates)
+    for c in candidates:
+        for inner in re.findall(r'https?://([^/?#\s"\'>]+)', c):
+            expanded.append('https://' + inner)
+        for inner in re.findall(r'(?<!:)//([^/?#\s"\'>]+)', c):
+            expanded.append('//' + inner)
+
+    for url in expanded:
+        host = re.sub(r'^https?:', '', url.strip()).lstrip('/').split('/')[0].lower()
+        if host in domain_variants:
+            logging.info(f"友链页面 {page_url} 中找到作者链接: {url}")
+            return True
+    return False
+
+
+def _fetch_rendered_html(url):
+    """用无头 Chrome 渲染页面并返回渲染后的 HTML。
+
+    用于静态 HTML 抓不到链接的 JS 渲染站点（VitePress / Hexo 部分主题 / SPA）。
+    环境无 selenium 或 Chrome 时返回 None（调用方静默退回静态结果）。
+    """
+    try:
+        from selenium import webdriver
+        from selenium.webdriver.chrome.options import Options
+        from selenium.webdriver.chrome.service import Service
+        from webdriver_manager.chrome import ChromeDriverManager
+    except Exception as e:
+        logging.info(f"[render] 未安装 selenium，跳过无头渲染兜底: {e}")
+        return None
+    options = Options()
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.binary_location = os.getenv("CHROME_BIN", "/usr/bin/google-chrome")
+    driver = None
+    try:
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=options)
+        driver.set_page_load_timeout(30)
+        driver.get(url)
+        # 等待前端框架完成友链列表渲染
+        import time
+        time.sleep(3)
+        return driver.page_source
+    except Exception as e:
+        logging.warning(f"[render] 渲染 {url} 失败，跳过: {e}")
+        return None
+    finally:
+        if driver is not None:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+
+
 def check_author_link_in_page(session, linkpage_url):
     """检测友链页面是否包含指向作者的真实链接（<a href>）。
 
     反链（反向链接）必须是可点击的超链接；仅在页面中以纯文本出现作者域名
     （如脚本、JSON、评论区等）不计为反链，避免误报。
+
+    先以静态 HTML 检测；若未命中，再尝试无头浏览器渲染（应对 JS 渲染站点）。
     """
     if not AUTHOR_URL:
         return False
@@ -271,11 +346,14 @@ def check_author_link_in_page(session, linkpage_url):
 
     content = response.text
 
-    # 提取所有 href 属性值，逐个解析主机名判断是否指向作者域名
-    for href in re.findall(r'href\s*=\s*["\']([^"\']+)["\']', content, re.IGNORECASE):
-        host = re.sub(r'^https?:', '', href.strip()).lstrip('/').split('/')[0].lower()
-        if host in domain_variants:
-            logging.info(f"友链页面 {linkpage_url} 中找到作者链接: {href}")
+    if _page_has_author_link(content, bare, domain_variants, linkpage_url):
+        return True
+
+    # 静态 HTML 未命中：可能是 JS 渲染的 SPA（如 VitePress），用无头浏览器渲染后再查
+    rendered = _fetch_rendered_html(linkpage_url)
+    if rendered:
+        logging.info(f"友链页面 {linkpage_url} 静态检测未命中，尝试无头渲染后复查")
+        if _page_has_author_link(rendered, bare, domain_variants, linkpage_url):
             return True
 
     # 未找到真实链接；若域名仅作为文本出现，单独记录但不计为反链
