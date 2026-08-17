@@ -2,7 +2,7 @@ name: Apply Friend Link
 
 on:
   issues:
-    types: [opened]
+    types: [opened, reopened]
 
 permissions:
   issues: write
@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: 解析并写入
         uses: actions/github-script@v7
+        env:
+          AUTHOR_URL: ${{ secrets.AUTHOR_URL }}
         with:
           script: |
             const { owner, repo } = context.repo;
@@ -32,6 +34,32 @@ jobs:
               const re = new RegExp("###\\s*" + label + "\\s*\\n+([\\s\\S]*?)(?=\\n###|$)");
               const m = body.match(re);
               return m ? m[1].trim() : "";
+            }
+
+            // 反链检测：判断页面是否含指向本站的真实超链接（<a href> / data-url 等）
+            async function hasAuthorLink(pageUrl, authorUrl) {
+              const bare = authorUrl.replace(/^https?:\/\//i, "").replace(/\/+$/, "").toLowerCase();
+              const variants = new Set([bare, "www." + bare]);
+              if (bare.startsWith("www.")) variants.add(bare.slice(4));
+              const resp = await fetch(pageUrl, {
+                headers: { "User-Agent": "Mozilla/5.0 (compatible; FriendLinkBot/1.0)" },
+                redirect: "follow",
+              });
+              if (!resp.ok) return false;
+              const html = await resp.text();
+              const attrRe = /(?:href|data-url|data-link|data-href)\s*=\s*["']([^"']+)["']/gi;
+              let m2, candidates = [];
+              while ((m2 = attrRe.exec(html))) candidates.push(m2[1]);
+              const expanded = candidates.slice();
+              for (const c of candidates) {
+                for (const inner of c.matchAll(/https?:\/\/([^/?#\s"'>]+)/g)) expanded.push("https://" + inner[1]);
+                for (const inner of c.matchAll(/(?<!:)\/\/([^/?#\s"'>]+)/g)) expanded.push("//" + inner[1]);
+              }
+              for (const u of expanded) {
+                const host = u.replace(/^https?:\/\//i, "").replace(/^\/\//, "").split("/")[0].toLowerCase();
+                if (variants.has(host)) return true;
+              }
+              return false;
             }
 
             const title   = field("网站名称").replace(/\s+/g, " ").trim();
@@ -59,6 +87,26 @@ jobs:
             let finalSiteurl = siteurl;
             if (!/^https?:\/\//i.test(finalSiteurl)) {
               finalSiteurl = "https://" + finalSiteurl.replace(/^\/+/, "");
+            }
+
+            // 反链硬门槛：申请人须在其友链页(或首页)链回本站，否则拒绝
+            const authorUrl = process.env.AUTHOR_URL || "https://x1anyu.cn";
+            const pagesToCheck = [linkpage, finalSiteurl].filter(Boolean);
+            let linkedBack = false;
+            for (const p of pagesToCheck) {
+              try {
+                if (await hasAuthorLink(p, authorUrl)) { linkedBack = true; break; }
+              } catch (e) {
+                core.warning("反链检测异常 (" + p + "): " + e.message);
+              }
+            }
+            if (!linkedBack) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number,
+                body: "⚠️ **未通过反链核验**：在你的站点（" + (linkpage || finalSiteurl) + "）中未检测到指向 **" + authorUrl + "** 的真实友链。\n\n友链为互换，请先在你的友链页面添加本站友链（链接到 " + authorUrl + "），确认生效后再申请。关闭本 Issue 后重新打开即可重试。",
+              });
+              await github.rest.issues.update({ owner, repo, issue_number, state: "closed" });
+              return;
             }
 
             const repoInfo = await github.rest.repos.get({ owner, repo });
@@ -129,6 +177,6 @@ jobs:
 
             await github.rest.issues.createComment({
               owner, repo, issue_number,
-              body: "✅ 已自动添加友链 **" + title + "**（" + finalSiteurl + "）。\n\n已触发 `check_links` 重新部署，`friends.yufish.cn/friends.json` 预计几分钟内更新；博客页面加载时会直接读取最新清单（无需重新构建博客）。",
+              body: "✅ 反链核验通过，已自动添加友链 **" + title + "**（" + finalSiteurl + "）。\n\n已触发 `check_links` 重新部署，`friends.yufish.cn/friends.json` 预计几分钟内更新；博客页面加载时会直接读取最新清单（无需重新构建博客）。",
             });
             await github.rest.issues.update({ owner, repo, issue_number, state: "closed" });

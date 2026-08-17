@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        感谢申请友链！填写以下信息后提交，机器人会自动把你的站点加入友链清单（无需人工审核）。
+        感谢申请友链！提交后机器人会自动核验：**你的站点须已添加指向本站的友链（反链）**，核验通过才会加入列表。请先在你的友链页加上本站链接，再提交申请。
   - type: input
     id: title
     attributes:
@@ -27,7 +27,7 @@ body:
     id: linkpage
     attributes:
       label: 友链页面 URL
-      description: 你站点上的友链页面，便于互链检测（选填）
+      description: 你站点上放了本站友链的那一页。机器人会爬这页核验反链，**强烈建议填写**，留空则改爬首页。
       placeholder: https://example.com/friends/
     validations:
       required: false
