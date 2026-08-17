@@ -1,0 +1,511 @@
+name: Check Links and Generate JSON
+
+on:
+  schedule:
+    # 每天 2 次：状态检测（保留原有行为）
+    - cron: '0 1 * * *'
+    - cron: '0 13 * * *'
+    # 每 6 天 1 次：友链主页截图（新增，节省 CI 配额）
+    - cron: '30 1 1,7,13,19,25 * *'
+  workflow_dispatch:
+    inputs:
+      task:
+        description: '选择要执行的任务（仅手动触发时有效）'
+        required: false
+        type: choice
+        options:
+          - status_only        # 仅状态检测
+          - screenshots_only   # 仅截图（使用最近一次状态检测数据）
+          - both               # 状态检测 + 截图
+        default: status_only
+      target_link:
+        description: '只处理指定友链（填名称或URL关键词，多个用逗号分隔，留空=处理全部）'
+        required: false
+        type: string
+        default: ''
+
+env:
+  TZ: Asia/Shanghai
+
+jobs:
+  check_links:
+    name: 检测友链状态
+    runs-on: ubuntu-latest
+    # 始终运行状态检测（保证 result.json 总是最新，截图任务有数据可读；screenshots_only 模式也跑一次轻量级检测）
+    if: ${{ true }}
+    # 巡检异常回评 Issue 需要 issues:write；push page 分支需要 contents:write；cache/artifact 需要 actions
+    permissions:
+      contents: write
+      issues: write
+      actions: write
+    steps:
+    - name: Pull latest repository
+      uses: actions/checkout@v4
+
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Download result.json from page branch
+      run: |
+        echo "从 page 分支拉取最新 result.json（含历史截图 URL）..."
+        # 先试根目录（page 分支实际在根目录），失败回退到 static/ 子目录
+        HTTP_CODE=$(curl -sL -w "%{http_code}" -o ./result.json \
+          "https://raw.githubusercontent.com/${{ github.repository }}/page/result.json")
+        if [ "$HTTP_CODE" != "200" ]; then
+          echo "⚠️ 根目录未找到（HTTP $HTTP_CODE），尝试 static/result.json..."
+          HTTP_CODE=$(curl -sL -w "%{http_code}" -o ./result.json \
+            "https://raw.githubusercontent.com/${{ github.repository }}/page/static/result.json")
+        fi
+        if [ "$HTTP_CODE" != "200" ] || [ ! -s ./result.json ]; then
+          echo "⚠️ page 分支无 result.json（HTTP $HTTP_CODE），首次运行，创建空数据"
+          echo "{}" > ./result.json
+        else
+          echo "✅ 下载成功（$(stat -c%s ./result.json) bytes）"
+          python check_siteshot.py ./result.json
+        fi
+        # 【修复截图丢失】留一份下载时的 baseline，状态检测后再交叉回填 siteshot（双重保险）
+        cp -f ./result.json ./result.baseline.json
+        echo "baseline 已保存: $(stat -c%s ./result.baseline.json) bytes"
+
+    - name: Detect changes (auto-set TARGET_LINK)
+      id: detect_changes
+      env:
+        SOURCE_URL: ${{ secrets.SOURCE_URL }}
+      run: |
+        echo "==== 变更检测 ===="
+        # 友链清单真源：check-flink 仓库 main 分支的 static/friends.json
+        # （由 Issue 申请经 apply-friend.yml 自动写入；读 raw/main 可立即见到刚提交的变更，规避 page 分支部署延迟）
+        # 格式 {version, updatedAt, friends:[{title,imgurl,desc,siteurl,linkpage,enabled}]}
+        # 需经 convert_friends.py 转为 check-flink 内部 {link_list:[{name,link,linkpage}]}
+        REMOTE_URL="https://raw.githubusercontent.com/${{ github.repository }}/main/static/friends.json"
+        HTTP_CODE=000
+        for i in 1 2 3; do
+          HTTP_CODE=$(curl -sL -w "%{http_code}" -o ./friends.scratch.json "$REMOTE_URL" 2>/dev/null)
+          if [ "$HTTP_CODE" = "200" ] && [ -s ./friends.scratch.json ]; then
+            break
+          fi
+          echo "第 $i 次从远程清单拉取失败（HTTP $HTTP_CODE），${i}<3 时 2 秒后重试..."
+          [ "$i" -lt 3 ] && sleep 2
+        done
+        if [ "$HTTP_CODE" = "200" ] && [ -s ./friends.scratch.json ]; then
+          echo "✅ 清单下载成功（$(stat -c%s ./friends.scratch.json) bytes）"
+          python3 convert_friends.py friends.scratch.json friends.latest.json
+        else
+          echo "⚠️ 远程清单不可用（HTTP $HTTP_CODE），降级到 SOURCE_URL（my-blog 端点，已是 link_list 格式）..."
+          HTTP_CODE2=$(curl -sL -w "%{http_code}" -o ./friends.scratch.json "$SOURCE_URL" 2>/dev/null)
+          if [ "$HTTP_CODE2" != "200" ] || [ ! -s ./friends.scratch.json ]; then
+            echo "❌ SOURCE_URL 也失败（HTTP $HTTP_CODE2），跳过变更检测，走全量检测"
+            echo "TARGET_LINK_DETECTED=" >> $GITHUB_ENV
+            rm -f ./friends.scratch.json
+            exit 0
+          fi
+          echo "✅ SOURCE_URL 下载成功（$(stat -c%s ./friends.scratch.json) bytes）"
+          python3 convert_friends.py friends.scratch.json friends.latest.json
+        fi
+        echo "对比 result.json 检测变更..."
+        if [ -f ./result.json ] && [ -s ./result.json ]; then
+          # 优先使用 friends_watcher.py compare（如果可用）
+          if python -c "import friends_watcher" 2>/dev/null; then
+            DETECTED=$(python friends_watcher.py compare \
+              --current ./friends.latest.json \
+              --historical ./result.json 2>/dev/null || true)
+          else
+            # 回退：python3 -c 紧凑脚本（避免 YAML 多行缩进问题）
+            DETECTED=$(python3 -c "import json,sys;C=json.load(open('friends.latest.json'));H=json.load(open('result.json'));L=C.get('link_list',[])or(C if isinstance(C,list)else[]);S=H.get('link_status',[])or[];P={e.get('link',''):e for e in S if e.get('link')};X=[];E=sys.stderr;exec('for I in L:\n K=(I.get(\"link\")or\"\").strip()\n if not K: continue\n if K not in P:\n  X.append(K);print(\"[detect] 新增: \"+K,file=E)\n else:\n  p=P[K];pn=(p.get(\"name\")or\"\").strip();pl=(p.get(\"linkpage\")or\"\").strip()\n  cn=(I.get(\"name\")or\"\").strip();cl=(I.get(\"linkpage\")or\"\").strip()\n  if pn!=cn or pl!=cl: X.append(K);print(\"[detect] 修改: \"+K,file=E)');print('|'.join(dict.fromkeys(X)))" 2>&1)
+          fi
+          if [ -n "$DETECTED" ]; then
+            echo "检测到变更的友链: $DETECTED"
+            echo "TARGET_LINK_DETECTED=$DETECTED" >> $GITHUB_ENV
+          else
+            echo "未检测到变更"
+            echo "TARGET_LINK_DETECTED=" >> $GITHUB_ENV
+          fi
+        else
+          echo "result.json 不存在或为空，首次运行，走全量检测"
+          echo "TARGET_LINK_DETECTED=" >> $GITHUB_ENV
+        fi
+        rm -f ./friends.scratch.json
+
+    - name: Run Python script to check frined-links
+      # screenshots_only 模式：只截图不检测，跳过 Python，避免覆盖 result.json 里已有的状态
+      if: ${{ inputs.task != 'screenshots_only' }}
+      env:
+        PROXY_URL: ${{ secrets.PROXY_URL }}
+        AUTHOR_URL: ${{ secrets.AUTHOR_URL }}
+        # 优先级：手动输入的 target_link > 自动检测的变更 > 空（全量）
+        # 关键：screenshots_only 模式下，check_links 跑全部友链（不应用 target_link 过滤），
+        # 避免把 result.json 过滤成只剩 target_link 那一条、丢失其他友链的状态和截图 URL。
+        # target_link 过滤只应在 take_screenshots job 中生效。
+        TARGET_LINK: ${{ inputs.task == 'screenshots_only' && '' || (inputs.target_link || env.TARGET_LINK_DETECTED) }}
+      run: |
+        # 监控源：优先用 Detect changes 生成的本地清单（来自 check-flink static/friends.json，零博客重建）
+        # 缺失时回退到 SOURCE_URL secret（my-blog 端点）
+        if [ -f ./friends.latest.json ] && [ -s ./friends.latest.json ]; then
+          export SOURCE_URL="./friends.latest.json"
+        else
+          echo "⚠️ 本地 friends.latest.json 缺失，回退到 SOURCE_URL secret"
+          export SOURCE_URL="${{ secrets.SOURCE_URL }}"
+        fi
+        echo "SOURCE_URL: $SOURCE_URL"
+        echo "AUTHOR_URL: $AUTHOR_URL"
+        echo "TARGET_LINK: $TARGET_LINK"
+        python main.py
+
+    - name: Cross-fill siteshot from baseline (defense-in-depth)
+      run: |
+        echo "==== baseline vs 检测后 siteshot 交叉回填 ===="
+        python3 - <<'PY'
+        import json, os, re, sys
+        def norm(u):
+            u=(u or '').strip().lower()
+            u=re.sub(r'^https?://','',u).rstrip('/')
+            for s in ('?','#'):
+                u=u.split(s,1)[0] if s in u else u
+            return u
+        def host(u):
+            return norm(u).split('/',1)[0] if norm(u) else ''
+        baseline=sys.argv[1] if len(sys.argv)>1 else 'result.baseline.json'
+        target='result.json'
+        if not os.path.exists(baseline) or os.path.getsize(baseline)==0 or not os.path.exists(target):
+            print('跳过（无 baseline 或 result.json）')
+            sys.exit(0)
+        with open(baseline,encoding='utf-8') as f:
+            B=json.load(f)
+        with open(target,encoding='utf-8') as f:
+            T=json.load(f)
+        bl=B.get('link_status',[]) or []
+        tl=T.get('link_status',[]) or []
+        # 建 baseline 多键索引
+        idx_ex={}; idx_nm={}; idx_hh={}; idx_ho={}
+        for e in bl:
+            L=e.get('link','') or ''
+            N=(e.get('name','') or '').strip().lower()
+            if L: idx_ex.setdefault(L,e)
+            n=norm(L); h=host(L)
+            if n and n not in idx_nm: idx_nm[n]=e
+            if N and h and (N,h) not in idx_hh: idx_hh[(N,h)]=e
+            if h: idx_ho.setdefault(h,[]).append(e)
+        def lookup(lk,nm):
+            if lk in idx_ex: return idx_ex[lk]
+            n=norm(lk); h=host(lk); nm=(nm or '').strip().lower()
+            if n and n in idx_nm: return idx_nm[n]
+            if nm and h and (nm,h) in idx_hh: return idx_hh[(nm,h)]
+            if h and len(idx_ho.get(h,[]))==1: return idx_ho[h][0]
+            if h and len(idx_ho.get(h,[]))==1 and nm:
+                o=idx_ho[h][0]; on=(o.get('name','') or '').strip().lower()
+                if on and (nm==on or nm in on or on in nm): return o
+            return {}
+        filled=0; before_empty=sum(1 for e in tl if not (e.get('siteshot') or '').strip())
+        for e in tl:
+            shot=(e.get('siteshot') or '').strip()
+            if shot: continue
+            m=lookup(e.get('link',''), e.get('name',''))
+            ps=(m.get('siteshot') or '').strip()
+            if ps:
+                e['siteshot']=ps
+                filled+=1
+        after_empty=sum(1 for e in tl if not (e.get('siteshot') or '').strip())
+        print(f"空 siteshot: {before_empty} → {after_empty}（本次找回 {filled}）")
+        T['link_status']=tl
+        with open(target,'w',encoding='utf-8') as f:
+            json.dump(T,f,ensure_ascii=False,indent=4)
+        PY
+        python check_siteshot.py ./result.json
+
+    - name: 巡检异常回评对应 Issue（按 issue_id）
+      # screenshots_only 模式不重跑检测，link_status 是旧数据，跳过避免误报
+      if: ${{ inputs.task != 'screenshots_only' }}
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const { owner, repo } = context.repo;
+          const norm = (u) => (u || '').trim().toLowerCase().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+
+          // 1) 读取巡检结果
+          let result;
+          try {
+            result = JSON.parse(fs.readFileSync('./result.json', 'utf8'));
+          } catch (e) {
+            core.warning('读取 result.json 失败: ' + e.message);
+            return;
+          }
+          const statuses = result.link_status || [];
+          if (statuses.length === 0) {
+            console.log('无 link_status 数据，跳过回评');
+            return;
+          }
+
+          // 2) 取 issue_id 映射（siteurl -> issue_id）
+          const issueMap = {};
+          try {
+            const fd = await github.rest.repos.getContent({ owner, repo, path: 'static/friends.json', ref: 'main' });
+            const friends = JSON.parse(Buffer.from(fd.data.content, 'base64').toString('utf8')).friends || [];
+            for (const f of friends) {
+              if (f.siteurl && f.issue_id) issueMap[norm(f.siteurl)] = f.issue_id;
+            }
+          } catch (e) {
+            core.warning('读取 friends.json 失败: ' + e.message);
+            return;
+          }
+
+          // 3) 异常检测：评论 + 打 needs-update（仅首次，避免每日刷屏）
+          const anomalyIds = new Set();
+          for (const s of statuses) {
+            const id = issueMap[norm(s.link || '')];
+            if (!id) continue; // 旧友链无 issue_id 的，跳过 Issue 通知（异常仍记录于 result.json）
+            const isAnomaly = (s.status && s.status !== 'ok') || (s.has_author_link === false);
+            if (!isAnomaly) continue;
+            anomalyIds.add(id);
+
+            const iss = await github.rest.issues.get({ owner, repo, issue_number: id });
+            const labels = (iss.data.labels || []).map((l) => l.name);
+            if (labels.includes('needs-update')) {
+              console.log('Issue #' + id + ' 已带 needs-update，跳过重复评论');
+              continue;
+            }
+
+            let reason = '未知异常';
+            if (s.status === 'error') reason = '站点不可访问（连接/请求错误）';
+            else if (s.status === 'geo_blocked') reason = '疑似地域拦截（geo_blocked）' + (s.geo_hint ? '：' + s.geo_hint : '');
+            else if (s.status === 'unknown') reason = '状态未知（无法判定）';
+            else if (s.status && s.status !== 'ok') reason = '站点异常（status=' + s.status + '）';
+            if (s.has_author_link === false) reason += '；未检测到指向本站的真实友链';
+
+            await github.rest.issues.createComment({
+              owner, repo, issue_number: id,
+              body: '⚠️ **每日巡检异常**：' + reason + '。\n\n请检查该友链，修复后在本 Issue 下回复任意内容即可重新验证（Issue 保持开放）。',
+            });
+            await github.rest.issues.addLabels({ owner, repo, issue_number: id, labels: ['needs-update'] });
+            console.log('已对 Issue #' + id + ' 评论异常并打 needs-update');
+          }
+
+          // 4) 恢复检测：带 needs-update 且当前正常的友链，移除标签 + 评论已恢复
+          for (const id of new Set(Object.values(issueMap))) {
+            if (anomalyIds.has(id)) continue;
+            try {
+              const iss = await github.rest.issues.get({ owner, repo, issue_number: id });
+              const labels = (iss.data.labels || []).map((l) => l.name);
+              if (!labels.includes('needs-update')) continue;
+              await github.rest.issues.removeLabel({ owner, repo, issue_number: id, name: 'needs-update' }).catch(() => {});
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: id,
+                body: '✅ **巡检已恢复正常**：当前状态 ok 且已检测到指向本站的真实友链，已移除 `needs-update` 标签。',
+              });
+              console.log('Issue #' + id + ' 已恢复正常，移除 needs-update');
+            } catch (e) {
+              core.warning('处理恢复通知失败 (Issue #' + id + '): ' + e.message);
+            }
+          }
+
+    - name: Incremental screenshot (only when changes detected)
+      if: ${{ inputs.task != 'screenshots_only' }}
+      env:
+        IMG_UPLOAD_URL: ${{ secrets.IMG_UPLOAD_URL }}
+        IMG_AUTH_CODE: ${{ secrets.IMG_AUTH_CODE }}
+        SCREENSHOT_WORKERS: '2'
+        TARGET_LINK: ${{ env.TARGET_LINK_DETECTED || inputs.target_link }}
+      run: |
+        if [ -z "$TARGET_LINK" ]; then
+          echo "无变更友链，跳过增量截图"
+          exit 0
+        fi
+        echo "检测到友链变更，增量截图..."
+        echo "TARGET_LINK: $TARGET_LINK"
+        echo "IMG_UPLOAD_URL: $IMG_UPLOAD_URL"
+
+        # 安装 Chrome
+        if ! command -v google-chrome &>/dev/null; then
+          echo "安装 Chrome..."
+          if command -v apt-get &>/dev/null; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq google-chrome-stable 2>/dev/null || \
+              (wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && \
+               sudo dpkg -i /tmp/chrome.deb 2>/dev/null; sudo apt-get install -f -y -qq)
+            rm -f /tmp/chrome.deb
+          fi
+          echo "Chrome 安装完成"
+        fi
+        # 安装中文字体
+        if ! fc-list :lang=zh 2>/dev/null | grep -q .; then
+          sudo apt-get install -y -qq fonts-wqy-microhei fonts-wqy-zenhei 2>/dev/null || true
+        fi
+
+        export CHROME_BIN=$(command -v google-chrome || echo "/usr/bin/google-chrome")
+        echo "CHROME_BIN: $CHROME_BIN"
+
+        echo "==== result.json 状态（截图前） ===="
+        python check_siteshot.py ./result.json
+
+        python screenshot_runner.py
+
+        echo "==== result.json 状态（截图后） ===="
+        python check_siteshot.py ./result.json
+
+    - name: Upload result.json as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: 'result_json'
+        path: './result.json'
+        retention-days: 10
+
+    - name: Configure git
+      run: |
+        git config --global user.email "actions@github.com"
+        git config --global user.name "GitHub Actions"
+
+    - name: Commit and push
+      run: |
+        echo "==== 推送前（check_links）result.json 状态 ===="
+        if [ -f ./result.json ]; then
+          echo "📦 result.json 大小: $(stat -c%s ./result.json) bytes"
+          python check_siteshot.py ./result.json
+        else
+          echo "❌ result.json 不存在"
+        fi
+        echo "================================================"
+
+        cp ./result.json static/
+        cd static
+        git init
+        git add .
+        git commit -m "⏱️GitHub Action每日定时更新"
+        git push --force https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:page
+
+    - name: Delete Workflow Runs
+      uses: Mattraks/delete-workflow-runs@v2
+      with:
+        retain_days: 30
+        keep_minimum_runs: 6
+
+  take_screenshots:
+    name: 截取友链主页截图
+    runs-on: ubuntu-latest
+    # 加回 needs: [check_links]：截图 job 等状态检测 job 跑完并 push result.json 后再执行，
+    # 避免「both / screenshots_only 手动」两个 job 并发强推 page 分支、互相覆盖丢数据。
+    # check_links 的 if 恒为 true，定时（每日/每6天）与手动各场景它都会先跑，
+    # 所以这里依赖它既能消除竞态、又不破坏定时截图。
+    needs: [check_links]
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '30 1 1,7,13,19,25 * *') || (github.event_name == 'workflow_dispatch' && (inputs.task == 'screenshots_only' || inputs.task == 'both')) }}
+    steps:
+    - name: Pull latest repository
+      uses: actions/checkout@v4
+      # 注意：必须用默认分支（main），不能 ref: page
+      # page 分支只含静态文件（result.json/index.html 等），没有 requirements.txt 和 Python 脚本
+      # 这里的 result.json 由下方 download-artifact 步骤从 check_links job 拿，不依赖 checkout
+
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Setup Chrome
+      uses: browser-actions/setup-chrome@v2
+      with:
+        chrome-version: stable
+
+    - name: Install Chinese fonts
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y fonts-wqy-microhei fonts-wqy-zenhei
+
+    - name: Download result.json from page branch
+      run: |
+        echo "从 page 分支拉取最新 result.json（含状态 + 历史截图 URL）..."
+        # 先试根目录（page 分支实际在根目录），失败回退到 static/ 子目录
+        HTTP_CODE=$(curl -sL -w "%{http_code}" -o ./result.json \
+          "https://raw.githubusercontent.com/${{ github.repository }}/page/result.json")
+        if [ "$HTTP_CODE" != "200" ]; then
+          echo "⚠️ 根目录未找到（HTTP $HTTP_CODE），尝试 static/result.json..."
+          HTTP_CODE=$(curl -sL -w "%{http_code}" -o ./result.json \
+            "https://raw.githubusercontent.com/${{ github.repository }}/page/static/result.json")
+        fi
+        if [ "$HTTP_CODE" != "200" ] || [ ! -s ./result.json ]; then
+          echo "❌ page 分支无 result.json（HTTP $HTTP_CODE），截图 job 无法运行"
+          exit 1
+        fi
+        echo "✅ 下载成功（$(stat -c%s ./result.json) bytes）"
+        python check_siteshot.py ./result.json
+
+    - name: Run screenshot
+      env:
+        IMG_UPLOAD_URL: ${{ secrets.IMG_UPLOAD_URL }}
+        IMG_AUTH_CODE: ${{ secrets.IMG_AUTH_CODE }}
+        CHROME_BIN: /usr/bin/google-chrome
+        SCREENSHOT_WORKERS: '2'
+        TARGET_LINK: ${{ inputs.target_link }}
+      run: |
+        echo "==== result.json 状态 ===="
+        if [ -f ./result.json ]; then
+          echo "✅ result.json 存在"
+          echo "📦 大小: $(stat -c%s ./result.json) bytes"
+          python check_siteshot.py ./result.json
+        else
+          echo "❌ result.json 不存在（download-artifact 失败）"
+        fi
+        echo "==========================="
+
+        echo "IMG_UPLOAD_URL: $IMG_UPLOAD_URL"
+        echo "TARGET_LINK: $TARGET_LINK"
+        python screenshot_runner.py
+
+    - name: Configure git
+      run: |
+        git config --global user.email "actions@github.com"
+        git config --global user.name "GitHub Actions"
+
+    - name: Commit and push (with siteshot)
+      run: |
+        echo "==== 推送前 result.json 状态 ===="
+        if [ -f ./result.json ]; then
+          echo "📦 result.json 大小: $(stat -c%s ./result.json) bytes"
+          python check_siteshot.py ./result.json
+        else
+          echo "❌ result.json 不存在，无法推送"
+          exit 1
+        fi
+        echo "================================"
+
+        cp ./result.json static/
+        cd static
+        git init
+        git add .
+        git commit -m "📸友链主页截图（每 6 天自动更新）"
+        git push --force https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:page
+
+  keepalive-workflow:
+    name: Keepalive Workflow
+    if: ${{ always() }}
+    needs: [check_links, take_screenshots]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - uses: liskin/gh-workflow-keepalive@v1
