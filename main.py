@@ -10,6 +10,7 @@ from queue import Queue
 from datetime import datetime
 from urllib.parse import urlparse, quote
 import concurrent.futures
+import threading
 from typing import Optional, Tuple, Any
 
 # 地域屏蔽诊断模块
@@ -23,6 +24,32 @@ logging.basicConfig(
 )
 
 warnings.filterwarnings("ignore", message="Unverified HTTPS request is being made.*")
+
+# chromedriver 路径：在线程池启动前单线程预解析一次，所有 worker 复用同一路径，
+# 避免并发调用 webdriver_manager 抢缓存导致 tuple index out of range（与截图竞态同理）。
+CHROMEDRIVER_PATH: Optional[str] = None
+_DRIVER_PATH_LOCK = threading.Lock()
+
+
+def _resolve_chromedriver() -> Optional[str]:
+    """单线程预解析 chromedriver 路径，结果缓存复用（线程安全）。
+
+    返回解析到的可执行路径；若环境无 selenium/webdriver_manager 则返回 None，
+    由调用方静默退回静态检测（与 _fetch_rendered_html 的 try/except 一致）。
+    """
+    global CHROMEDRIVER_PATH
+    if CHROMEDRIVER_PATH is not None:
+        return CHROMEDRIVER_PATH
+    with _DRIVER_PATH_LOCK:
+        if CHROMEDRIVER_PATH is not None:
+            return CHROMEDRIVER_PATH
+        try:
+            from webdriver_manager.chrome import ChromeDriverManager
+            CHROMEDRIVER_PATH = ChromeDriverManager().install()
+        except Exception as e:  # noqa: BLE001
+            logging.info(f"[render] 无法解析 chromedriver 路径，跳过无头渲染兜底: {e}")
+            CHROMEDRIVER_PATH = ""  # 标记为已解析但失败，避免反复重试
+        return CHROMEDRIVER_PATH or None
 
 # 请求头统一配置
 HEADERS = {
@@ -292,10 +319,15 @@ def _fetch_rendered_html(url):
         from selenium import webdriver
         from selenium.webdriver.chrome.options import Options
         from selenium.webdriver.chrome.service import Service
-        from webdriver_manager.chrome import ChromeDriverManager
     except Exception as e:
         logging.info(f"[render] 未安装 selenium，跳过无头渲染兜底: {e}")
         return None
+
+    # 复用单线程预解析的 chromedriver 路径，绝不在并发 worker 内再调 webdriver_manager
+    driver_path = _resolve_chromedriver()
+    if not driver_path:
+        return None
+
     options = Options()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
@@ -304,12 +336,12 @@ def _fetch_rendered_html(url):
     options.binary_location = os.getenv("CHROME_BIN", "/usr/bin/google-chrome")
     driver = None
     try:
-        service = Service(ChromeDriverManager().install())
+        service = Service(executable_path=driver_path)
         driver = webdriver.Chrome(service=service, options=options)
-        driver.set_page_load_timeout(30)
+        driver.set_page_load_timeout(20)
+        driver.set_script_timeout(20)
         driver.get(url)
         # 等待前端框架完成友链列表渲染
-        import time
         time.sleep(3)
         return driver.page_source
     except Exception as e:
@@ -506,6 +538,9 @@ def main():
                 return
         else:
             check_list = link_list
+
+        # 线程池启动前单线程预解析 chromedriver，避免并发 worker 抢 webdriver_manager 缓存（tuple index out of range）
+        _resolve_chromedriver()
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             # 每个 worker 各自用独立 Session，避免多线程共享同一个 Session（非线程安全）
