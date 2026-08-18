@@ -7,6 +7,8 @@ on:
     - cron: '0 13 * * *'
     # 每 6 天 1 次：友链主页截图（新增，节省 CI 配额）
     - cron: '30 1 1,7,13,19,25 * *'
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       task:
@@ -314,7 +316,7 @@ jobs:
           }
 
     - name: Incremental screenshot (only when changes detected)
-      if: ${{ inputs.task != 'screenshots_only' }}
+      if: ${{ github.event_name != 'push' && inputs.task != 'screenshots_only' }}
       env:
         IMG_UPLOAD_URL: ${{ secrets.IMG_UPLOAD_URL }}
         IMG_AUTH_CODE: ${{ secrets.IMG_AUTH_CODE }}
