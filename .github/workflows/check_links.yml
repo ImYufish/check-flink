@@ -29,6 +29,13 @@ on:
 env:
   TZ: Asia/Shanghai
 
+# 串行化：检测与截图两个 job 都会强推 page 分支，跨「定时 / push / 手动」多个入口
+# 可能并发覆盖。用同一 group 串行，cancel-in-progress:false 保证在跑的任务不被取消、
+# 后续任务排队，避免 result.json / 截图互相覆盖丢数据。
+concurrency:
+  group: check-links
+  cancel-in-progress: false
+
 jobs:
   check_links:
     name: 检测友链状态
@@ -438,23 +445,13 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y fonts-wqy-microhei fonts-wqy-zenhei
 
-    - name: Download result.json from page branch
-      run: |
-        echo "从 page 分支拉取最新 result.json（含状态 + 历史截图 URL）..."
-        # 先试根目录（page 分支实际在根目录），失败回退到 static/ 子目录
-        HTTP_CODE=$(curl -sL -w "%{http_code}" -o ./result.json \
-          "https://raw.githubusercontent.com/${{ github.repository }}/page/result.json")
-        if [ "$HTTP_CODE" != "200" ]; then
-          echo "⚠️ 根目录未找到（HTTP $HTTP_CODE），尝试 static/result.json..."
-          HTTP_CODE=$(curl -sL -w "%{http_code}" -o ./result.json \
-            "https://raw.githubusercontent.com/${{ github.repository }}/page/static/result.json")
-        fi
-        if [ "$HTTP_CODE" != "200" ] || [ ! -s ./result.json ]; then
-          echo "❌ page 分支无 result.json（HTTP $HTTP_CODE），截图 job 无法运行"
-          exit 1
-        fi
-        echo "✅ 下载成功（$(stat -c%s ./result.json) bytes）"
-        python check_siteshot.py ./result.json
+    - name: Download result.json artifact from check_links
+      # take_screenshots 依赖 check_links（needs: [check_links]），后者已将最新
+      # result.json 上传为 artifact；直接复用，省去一次 page 分支网络拉取。
+      uses: actions/download-artifact@v4
+      with:
+        name: 'result_json'
+        path: '.'
 
     - name: Run screenshot
       env:

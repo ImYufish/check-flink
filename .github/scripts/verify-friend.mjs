@@ -3,6 +3,7 @@
 // 输出：verify_result.json（含 pass / reachable / hasReciprocal / status / reason / engine）
 import { chromium } from "playwright";
 import fs from "fs";
+import dns from "node:dns/promises";
 
 const inputPath = process.env.VERIFY_INPUT || "verify_input.json";
 const outputPath = process.env.VERIFY_RESULT || "verify_result.json";
@@ -21,6 +22,52 @@ const out = {
   pass: false,
   engine: "playwright",
 };
+
+// ---- SSRF 防护：仅允许 http/https，且目标主机不能是内网/保留地址 ----
+// 公开仓库的公开 Issue 任何人可提交 URL，验证器若直接 fetch 任意地址，
+// 可能被用来探测云元数据端点(169.254.169.254)或内网服务。故做 scheme 白名单 + 私有地址拦截。
+function isHttpUrl(u) {
+  try {
+    const p = new URL(u);
+    return p.protocol === "http:" || p.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+function isPrivateIp(ip) {
+  if (!ip) return true;
+  if (ip.includes(":")) {
+    const v = ip.toLowerCase();
+    if (v === "::1" || v === "::" || v === "0:0:0:0:0:0:0:0") return true;
+    if (v.startsWith("fe80")) return true; // 链路本地
+    if (v.startsWith("fc") || v.startsWith("fd")) return true; // 唯一本地 fc00::/7
+    return false;
+  }
+  const p = ip.split(".").map(Number);
+  if (p.length !== 4 || p.some(Number.isNaN)) return true;
+  if (p[0] === 0) return true;
+  if (p[0] === 10) return true;
+  if (p[0] === 127) return true;
+  if (p[0] === 169 && p[1] === 254) return true;
+  if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return true;
+  if (p[0] === 192 && p[1] === 168) return true;
+  return false;
+}
+async function isPrivateHost(hostname) {
+  let addrs;
+  try {
+    addrs = await dns.lookup(hostname, { all: true });
+  } catch {
+    return true; // 解析失败 → 保守拒绝
+  }
+  for (const a of addrs) {
+    if (isPrivateIp(a.address)) return true;
+  }
+  return false;
+}
+function getHostname(u) {
+  try { return new URL(u).hostname; } catch { return ""; }
+}
 
 // 判断页面是否含指向本站的真实超链接（兼容 <a href> / data-url / 跳转型内嵌 URL）
 function containsAuthorLink(html, authorUrl) {
@@ -63,23 +110,16 @@ async function checkWithFetch(url, author) {
   };
 }
 
-try {
-  let browser;
-  try {
-    browser = await chromium.launch();
-  } catch (launchErr) {
-    // Playwright 启动失败（环境异常）→ 降级到 fetch 检测，不中断流程
-    const r = await checkWithFetch(target, authorUrl);
-    out.reachable = r.reachable;
-    out.hasReciprocal = r.hasReciprocal;
-    out.status = r.status;
-    out.reason = r.reason;
-    out.engine = "fetch-fallback";
-    out.pass = out.reachable && out.hasReciprocal;
-    fs.writeFileSync(outputPath, JSON.stringify(out, null, 2));
-    process.exit(0);
-  }
+// === 安全闸门：任何网络访问前先校验 target ===
+if (!isHttpUrl(target) || (await isPrivateHost(getHostname(target)))) {
+  out.reason = "友链地址不合法或指向内网/保留地址，已拒绝访问（安全策略）";
+  fs.writeFileSync(outputPath, JSON.stringify(out, null, 2));
+  process.exit(0);
+}
 
+let browser;
+try {
+  browser = await chromium.launch();
   const page = await browser.newPage({
     userAgent: "Mozilla/5.0 (compatible; FriendLinkBot/1.0)",
   });
@@ -89,8 +129,10 @@ try {
     out.status = resp ? resp.status() : 0;
     if (resp && resp.ok()) {
       out.reachable = true;
-      // 给 JS 渲染（SPA / VitePress 等）一点时间
-      await page.waitForTimeout(1500);
+      // 给 JS 渲染（SPA / VitePress 等）时间，并滚动到底触发懒加载/无限滚动友链
+      await page.waitForTimeout(2500);
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await page.waitForTimeout(800);
       const html = await page.content();
       out.hasReciprocal = containsAuthorLink(html, authorUrl);
       if (!out.hasReciprocal) {
@@ -101,11 +143,23 @@ try {
     }
   } catch (e) {
     out.reason = "访问失败：" + e.message;
-  } finally {
-    await browser.close();
   }
 } catch (e) {
+  if (!browser) {
+    // Playwright 启动失败（环境异常）→ 降级到 fetch 检测（target 已通过 SSRF 校验）
+    const r = await checkWithFetch(target, authorUrl);
+    out.reachable = r.reachable;
+    out.hasReciprocal = r.hasReciprocal;
+    out.status = r.status;
+    out.reason = r.reason;
+    out.engine = "fetch-fallback";
+    out.pass = out.reachable && out.hasReciprocal;
+    fs.writeFileSync(outputPath, JSON.stringify(out, null, 2));
+    process.exit(0);
+  }
   out.reason = "验证异常：" + e.message;
+} finally {
+  if (browser) await browser.close();
 }
 
 out.pass = out.reachable && out.hasReciprocal;

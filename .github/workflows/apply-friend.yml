@@ -9,7 +9,8 @@ on:
 permissions:
   issues: write
   contents: write
-  actions: write
+  # 不授予 actions: write —— 本流程不再显式触发 check_links，
+  # 由 check_links.yml 的 push:[main] 触发器在写入 friends.json 后自动接管部署。
 
 jobs:
   apply:
@@ -34,10 +35,17 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          # 锁定 playwright 版本，浏览器二进制随版本缓存，命中即跳过下载
+          key: playwright-browsers-${{ runner.os }}-1.62.1
+
       - name: Install Playwright + Chromium
         run: |
           npm init -y >/dev/null 2>&1
-          npm i playwright
+          npm i playwright@1.62.1
           npx playwright install --with-deps chromium
 
       - name: 解析 Issue
@@ -228,13 +236,5 @@ jobs:
             });
             await github.rest.issues.update({ owner, repo, issue_number, state: "closed" });
 
-            // 立即触发 check_links 重新部署，让 friends.json 几分钟内上线
-            try {
-              await github.rest.actions.createWorkflowDispatch({
-                owner, repo,
-                workflow_id: "check_links.yml",
-                ref: defaultBranch,
-              });
-            } catch (e) {
-              core.warning("触发 check_links 重新部署失败（可手动在 Actions 页面 Run workflow）: " + e.message);
-            }
+            // 写入 friends.json 即一次 push 到 main，check_links.yml 的 push:[main]
+            // 触发器会自动接管重新部署，无需在此显式 dispatch（避免重复跑、浪费 CI）。
