@@ -65,7 +65,7 @@
       "enabled": true
     },
     {
-      "title": "Silvaire",
+      "title": "Silvaire's Blog",
       "imgurl": "https://wsrv.nl/?url=avatars.githubusercontent.com/u/184231508?s=400&u=0a370792ba6bbb95a04d309171b562bcd7283a0f&v=3",
       "desc": "Per Aspera Ad Astra",
       "siteurl": "https://silvaire.top/",
@@ -104,6 +104,49 @@
       "siteurl": "https://blog.qtfyu.top",
       "linkpage": "https://blog.qtfyu.top/friends/",
       "rss": "https://blog.qtfyu.top/rss.xml",
+      "tags": ["Blog"],
+      "weight": 5,
+      "enabled": true
+    },
+    {
+      "title": "萧小晓",
+      "imgurl": "https://blog.lxlovo.top/assets/friends/png.png",
+      "desc": "一个爱写文的菜鸡。",
+      "siteurl": "https://blog.lxlovo.top",
+      "linkpage": "https://blog.lxlovo.top/friends/",
+      "rss": "https://blog.lxlovo.top/rss.xml",
+      "tags": ["Blog"],
+      "weight": 5,
+      "enabled": true
+    },
+    {
+      "title": "Zero - 浮生",
+      "imgurl": "https://vtdd.vip/_astro/avatar.ryzKiMN3_19g6Gw.webp",
+      "desc": "浮生一刹万般皆舍",
+      "siteurl": "https://vtdd.vip",
+      "linkpage": "https://vtdd.vip/friends/",
+      "rss": "https://vtdd.vip/rss.xml",
+      "tags": ["Blog"],
+      "weight": 5,
+      "enabled": true
+    },
+    {
+      "title": "Olinl Blog",
+      "imgurl": "https://blog.olinl.com/assets/images/avatar.webp",
+      "desc": "分享、实践、学习",
+      "siteurl": "https://blog.olinl.com",
+      "linkpage": "https://blog.olinl.com/friends/",
+      "rss": "https://blog.olinl.com/rss.xml",
+      "tags": ["Blog"],
+      "weight": 5,
+      "enabled": true
+    },
+    {
+      "title": "EGS-blog",
+      "imgurl": "https://blog.egs.cc.cd/hero/avatar.png",
+      "desc": "heron_i的小站",
+      "siteurl": "https://blog.egs.cc.cd",
+      "linkpage": "https://blog.egs.cc.cd/links",
       "tags": ["Blog"],
       "weight": 5,
       "enabled": true
