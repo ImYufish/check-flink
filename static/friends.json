@@ -85,6 +85,17 @@
       "tags": ["Blog"],
       "weight": 5,
       "enabled": true
+    },
+    {
+      "title": "UpXuu's blog",
+      "imgurl": "https://upxuu.com/images/me.jpg",
+      "desc": "逐光而上",
+      "siteurl": "https://upxuu.com",
+      "linkpage": "https://upxuu.com/friends/",
+      "rss": "https://upxuu.com/rss.xml",
+      "tags": ["Blog"],
+      "weight": 5,
+      "enabled": true
     }
   ]
 }
