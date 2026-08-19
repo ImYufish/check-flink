@@ -183,6 +183,17 @@
       "tags": ["Blog"],
       "weight": 5,
       "enabled": true
-    } 
+    },
+    {
+      "title": "furinafans",
+      "imgurl": "https://furinafans.com/_astro/avatar.CmRtaOLc_Z4qUwo.webp",
+      "desc": "你记得花，花就开，你记得我，我就在。",
+      "siteurl": "https://furinafans.com",
+      "linkpage": "https://furinafans.com/friends/",
+      "rss": "https://furinafans.com/rss.xml",
+      "tags": ["Blog"],
+      "weight": 5,
+      "enabled": true
+    }
   ]
 }
