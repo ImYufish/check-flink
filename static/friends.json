@@ -172,6 +172,17 @@
       "tags": ["Blog"],
       "weight": 5,
       "enabled": true
-    }
+    },
+    {
+      "title": "Phantomxjc",
+      "imgurl": "https://avatars.githubusercontent.com/phantomxjc?v=4&s=640",
+      "desc": "记录个人生活和学习的一个网站。",
+      "siteurl": "https://xjc.ccwu.cc",
+      "linkpage": "https://xjc.ccwu.cc/friends/",
+      "rss": "https://xjc.ccwu.cc/rss.xml",
+      "tags": ["Blog"],
+      "weight": 5,
+      "enabled": true
+    } 
   ]
 }
