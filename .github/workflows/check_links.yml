@@ -377,7 +377,7 @@ jobs:
         git config --global user.email "actions@github.com"
         git config --global user.name "GitHub Actions"
 
-    - name: Commit and push
+    - name: 提交并推送
       run: |
         echo "==== 推送前（check_links）result.json 状态 ===="
         if [ -f ./result.json ]; then
@@ -475,12 +475,12 @@ jobs:
         echo "TARGET_LINK: $TARGET_LINK"
         python screenshot_runner.py
 
-    - name: Configure git
+    - name: 配置 git
       run: |
         git config --global user.email "actions@github.com"
         git config --global user.name "GitHub Actions"
 
-    - name: Commit and push (with siteshot)
+    - name: 提交并推送（附带快照）
       run: |
         echo "==== 推送前 result.json 状态 ===="
         if [ -f ./result.json ]; then
