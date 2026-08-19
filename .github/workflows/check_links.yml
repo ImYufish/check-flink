@@ -1,4 +1,4 @@
-name: Check Links and Generate JSON
+name: 检查链接并生成JSON
 
 on:
   schedule:
@@ -48,10 +48,10 @@ jobs:
       issues: write
       actions: write
     steps:
-    - name: Pull latest repository
+    - name: 拉取最新仓库
       uses: actions/checkout@v4
 
-    - name: Cache pip packages
+    - name: 缓存 pip 包
       uses: actions/cache@v4
       with:
         path: ~/.cache/pip
@@ -59,17 +59,17 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-pip-
 
-    - name: Install python
+    - name: 安装 Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.12'
 
-    - name: Install dependencies
+    - name: 安装依赖项
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Download result.json from page branch
+    - name: 从页面 branch 下载 result.json
       run: |
         echo "从 page 分支拉取最新 result.json（含历史截图 URL）..."
         # 先试根目录（page 分支实际在根目录），失败回退到 static/ 子目录
@@ -91,7 +91,7 @@ jobs:
         cp -f ./result.json ./result.baseline.json
         echo "baseline 已保存: $(stat -c%s ./result.baseline.json) bytes"
 
-    - name: Detect changes (auto-set TARGET_LINK)
+    - name: 检测更改（自动设置 TARGET_LINK）
       id: detect_changes
       env:
         SOURCE_URL: ${{ secrets.SOURCE_URL }}
@@ -150,7 +150,7 @@ jobs:
         fi
         rm -f ./friends.scratch.json
 
-    - name: Run Python script to check frined-links
+    - name: 运行 Python 脚本检查好友链接
       # screenshots_only 模式：只截图不检测，跳过 Python，避免覆盖 result.json 里已有的状态
       if: ${{ inputs.task != 'screenshots_only' }}
       env:
@@ -175,7 +175,7 @@ jobs:
         echo "TARGET_LINK: $TARGET_LINK"
         python main.py
 
-    - name: Cross-fill siteshot from baseline (defense-in-depth)
+    - name: 从底线（纵深防守）的交叉补位现场画面
       run: |
         echo "==== baseline vs 检测后 siteshot 交叉回填 ===="
         python3 - <<'PY'
@@ -322,7 +322,7 @@ jobs:
             }
           }
 
-    - name: Incremental screenshot (only when changes detected)
+    - name: 增量截图（仅在检测到更改时）
       if: ${{ github.event_name != 'push' && inputs.task != 'screenshots_only' }}
       env:
         IMG_UPLOAD_URL: ${{ secrets.IMG_UPLOAD_URL }}
@@ -365,14 +365,14 @@ jobs:
         echo "==== result.json 状态（截图后） ===="
         python check_siteshot.py ./result.json
 
-    - name: Upload result.json as artifact
+    - name: 上传 result.json 作为构件
       uses: actions/upload-artifact@v4
       with:
         name: 'result_json'
         path: './result.json'
         retention-days: 10
 
-    - name: Configure git
+    - name: 配置 git
       run: |
         git config --global user.email "actions@github.com"
         git config --global user.name "GitHub Actions"
@@ -395,7 +395,7 @@ jobs:
         git commit -m "⏱️GitHub Action每日定时更新"
         git push --force https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:page
 
-    - name: Delete Workflow Runs
+    - name: 删除工作流运行
       uses: Mattraks/delete-workflow-runs@v2
       with:
         retain_days: 30
@@ -417,7 +417,7 @@ jobs:
       # page 分支只含静态文件（result.json/index.html 等），没有 requirements.txt 和 Python 脚本
       # 这里的 result.json 由下方 download-artifact 步骤从 check_links job 拿，不依赖 checkout
 
-    - name: Cache pip packages
+    - name: 缓存 pip 包
       uses: actions/cache@v4
       with:
         path: ~/.cache/pip
@@ -425,27 +425,27 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-pip-
 
-    - name: Install python
+    - name: 安装 Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.12'
 
-    - name: Install dependencies
+    - name: 安装依赖项
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Setup Chrome
+    - name: 设置 Chrome
       uses: browser-actions/setup-chrome@v2
       with:
         chrome-version: stable
 
-    - name: Install Chinese fonts
+    - name: 安装中文字体
       run: |
         sudo apt-get update
         sudo apt-get install -y fonts-wqy-microhei fonts-wqy-zenhei
 
-    - name: Download result.json artifact from check_links
+    - name: 从 check_linksInstall 下载 result.json 工件，安装中文字体
       # take_screenshots 依赖 check_links（needs: [check_links]），后者已将最新
       # result.json 上传为 artifact；直接复用，省去一次 page 分支网络拉取。
       uses: actions/download-artifact@v4
@@ -453,7 +453,7 @@ jobs:
         name: 'result_json'
         path: '.'
 
-    - name: Run screenshot
+    - name: 运行截图
       env:
         IMG_UPLOAD_URL: ${{ secrets.IMG_UPLOAD_URL }}
         IMG_AUTH_CODE: ${{ secrets.IMG_AUTH_CODE }}
@@ -500,7 +500,7 @@ jobs:
         git push --force https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:page
 
   keepalive-workflow:
-    name: Keepalive Workflow
+    name: 保持活动工作流
     if: ${{ always() }}
     needs: [check_links, take_screenshots]
     runs-on: ubuntu-latest
