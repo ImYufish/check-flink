@@ -468,6 +468,11 @@ def check_link(item, session) -> Tuple[dict, float, bool, Optional[Any], Optiona
                 page_to_check = item.get('linkpage') or link
                 has_author_link = check_author_link_in_page(session, page_to_check)
 
+            # 已人工核验反链（CF 等反爬站点 bot 抓不到，但站长已确认）：直接采信，不误标
+            if not has_author_link and item.get('verified'):
+                logging.info(f"[verified] {link} 已人工核验反链，强制记为有反链")
+                has_author_link = True
+
             return item, latency, has_author_link, last_response, last_error
         elif response and response.status_code != 200:
             logging.warning(f"[{method}] 状态码异常: {link} -> {response.status_code}")
@@ -504,6 +509,11 @@ def handle_api_requests(session) -> list:
                     if AUTHOR_URL:
                         page_to_check = item.get('linkpage') or link
                         has_author_link = check_author_link_in_page(session, page_to_check)
+
+                    # 已人工核验反链（CF 等反爬站点 bot 抓不到，但站长已确认）：直接采信，不误标
+                    if not has_author_link and item.get('verified'):
+                        logging.info(f"[verified] {link} 已人工核验反链，强制记为有反链")
+                        has_author_link = True
                 else:
                     logging.warning(f"[API] 状态异常: {link} -> [{res_json.get('code')}, {res_json.get('data')}]")
                     item['latency'] = -1

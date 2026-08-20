@@ -182,6 +182,7 @@
       "rss": "https://xjc.ccwu.cc/rss.xml",
       "tags": ["Blog"],
       "weight": 5,
+      "verified": true,
       "enabled": true
     },
     {

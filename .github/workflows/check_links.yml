@@ -262,11 +262,13 @@ jobs:
 
           // 2) 取 issue_id 映射（siteurl -> issue_id）
           const issueMap = {};
+          const verifiedMap = {};
           try {
             const fd = await github.rest.repos.getContent({ owner, repo, path: 'static/friends.json', ref: 'main' });
             const friends = JSON.parse(Buffer.from(fd.data.content, 'base64').toString('utf8')).friends || [];
             for (const f of friends) {
               if (f.siteurl && f.issue_id) issueMap[norm(f.siteurl)] = f.issue_id;
+              if (f.siteurl && f.verified === true) verifiedMap[norm(f.siteurl)] = true;
             }
           } catch (e) {
             core.warning('读取 friends.json 失败: ' + e.message);
@@ -278,7 +280,9 @@ jobs:
           for (const s of statuses) {
             const id = issueMap[norm(s.link || '')];
             if (!id) continue; // 旧友链无 issue_id 的，跳过 Issue 通知（异常仍记录于 result.json）
-            const isAnomaly = (s.status && s.status !== 'ok') || (s.has_author_link === false);
+            const isVerified = verifiedMap[norm(s.link || '')] === true;
+            // 已人工核验反链的站点（CF 等反爬，bot 抓不到）：不因其反链检出为 false 而误标；站点真不可达仍会告警
+            const isAnomaly = (s.status && s.status !== 'ok') || (s.has_author_link === false && !isVerified);
             if (!isAnomaly) continue;
             anomalyIds.add(id);
 
