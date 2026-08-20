@@ -9,6 +9,10 @@ on:
     - cron: '30 1 1,7,13,19,25 * *'
   push:
     branches: [main]
+    # 仅当友链真源（static/friends.json）变更时才触发检测，
+    # 避免每次推送代码（main.py / convert_friends.py 等）都跑一整轮巡检
+    paths:
+      - 'static/friends.json'
   workflow_dispatch:
     inputs:
       task:
