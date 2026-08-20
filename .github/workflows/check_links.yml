@@ -160,6 +160,7 @@ jobs:
       env:
         PROXY_URL: ${{ secrets.PROXY_URL }}
         AUTHOR_URL: ${{ secrets.AUTHOR_URL }}
+        EO_PING_URL: ${{ secrets.EO_PING_URL }}
         # 优先级：手动输入的 target_link > 自动检测的变更 > 空（全量）
         # 关键：screenshots_only 模式下，check_links 跑全部友链（不应用 target_link 过滤），
         # 避免把 result.json 过滤成只剩 target_link 那一条、丢失其他友链的状态和截图 URL。

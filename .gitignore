@@ -29,3 +29,8 @@ run_log.txt
 # Trae/Cursor IDE 临时文件
 .trae/
 .cursor/
+# Tencent Cloud EdgeOne
+.env
+.edgeone/*
+.tef_dist/*
+  
