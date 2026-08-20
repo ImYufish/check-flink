@@ -1,0 +1,8 @@
+{
+  "cloudFunctions": {
+    "mainlandRegions": ["ap-guangzhou"],
+    "nodejs": {
+      "maxDuration": 30
+    }
+  }
+}

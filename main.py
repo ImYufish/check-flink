@@ -79,6 +79,12 @@ RAW_HEADERS = {  # 仅用于获取原始数据，防止接收到Accept-Language�
 PROXY_URL_TEMPLATE = f"{os.getenv('PROXY_URL')}{{}}" if os.getenv("PROXY_URL") else None
 SOURCE_URL = os.getenv("SOURCE_URL", "https://blog.liushen.fun/flink_count.json")  # 默认本地文件
 RESULT_FILE = "./result.json"
+EO_PING_URL = os.getenv("EO_PING_URL")  # 国内延迟探针端点（钉在国内地域的 EO 云函数）；未设置则跳过
+if EO_PING_URL:
+    logging.info("国内延迟探针端点已配置: %s", EO_PING_URL)
+else:
+    logging.info("未配置 EO_PING_URL，跳过国内延迟探针（latency_cn 保持 -1）")
+
 AUTHOR_URL = os.getenv("AUTHOR_URL", "blog.liushen.fun")  # 作者URL，用于检测反链
 
 # TARGET_LINK 支持 "," 或 "|" 分隔多目标，支持精确/子串匹配
@@ -256,6 +262,45 @@ def request_url(session, url, headers=HEADERS, desc="", timeout=15, verify=True,
     except requests.RequestException as e:
         logging.warning(f"[{desc}] 请求失败: {url}，错误如下: \n================================================================\n{e}\n================================================================")
         return None, -1
+
+
+
+def get_domestic_latency(session, link, timeout=20):
+    """国内视角延迟探针：调用钉在国内地域的 EO 云函数，返回秒（与 latency 单位一致），失败返回 -1。
+
+    该函数部署在 EdgeOne Pages（Node.js 云函数），由 edgeone.json 的 mainlandRegions
+    钉死到国内地域；故即便从 GitHub Actions 美国 runner 调用，其 fetch 目标也走国内出口，
+    测到的是"国内视角"延迟。
+    """
+    if not EO_PING_URL:
+        return -1
+    try:
+        url = f"{EO_PING_URL.rstrip('/')}?url={quote(link, safe='')}"
+        resp, _ = request_url(session, url, headers=RAW_HEADERS, desc="国内延迟探针", timeout=timeout)
+        if not resp:
+            return -1
+        data = resp.json()
+        lat = data.get("latency")
+        if data.get("ok") and isinstance(lat, (int, float)):
+            return float(lat)
+        return -1
+    except Exception as e:
+        logging.warning(f"[国内探针] 获取 {link} 国内延迟失败: {e}")
+        return -1
+
+
+def pick_display_latency(latency, latency_cn):
+    """自动选取展示用延迟：取美国视角(latency)与国内视角(latency_cn)中更小的一个。
+
+    语义：对国内源站，latency_cn(广州->国内)通常更小 -> 显示国内真实延迟；
+    对国外源站，latency(美国->海外)通常更小 -> 自动退回显示美国视角(即该站自身响应速度)。
+    两者皆无效(-1/None)时返回 -1。由此无需手动区分各友链源站地域。
+    """
+    cands = []
+    for v in (latency, latency_cn):
+        if isinstance(v, (int, float)) and v > 0:
+            cands.append(float(v))
+    return min(cands) if cands else -1
 
 
 def load_previous_results():
@@ -444,6 +489,8 @@ def check_link(item, session) -> Tuple[dict, float, bool, Optional[Any], Optiona
     latency == -1 表示检测失败；需进一步地域屏蔽判定
     """
     link = item['link']
+    # 国内延迟探针（钉在国内地域的 EO 云函数）：与美国视角 latency 并存对照
+    item['latency_cn'] = get_domestic_latency(session, link)
     has_author_link = False
     last_response: Optional[Any] = None
     last_error: Optional[Exception] = None
@@ -632,6 +679,7 @@ def main():
                     'name': name,
                     'link': link,
                     'latency': latency,
+                    'latency_cn': item.get('latency_cn', -1),
                     'fail_count': fail_count,
                     'status': status,                 # 新增: ok / geo_blocked / error / unknown
                     'geo_hint': geo_hint,         # 新增: CN-block / response-403-text / cdn-waf / tcp-ok-http-fail / null
@@ -663,6 +711,7 @@ def main():
                         hist.setdefault("status", hist.get("status", "unknown"))
                         hist.setdefault("geo_hint", None)
                         hist.setdefault("geo_streak", 0)
+                        hist.setdefault("latency_cn", -1)
                         # 来源的 link/name 要以当前数据源的为准（可能改了名/尾斜杠），防止下次再匹配不上
                         hist["link"] = lk
                         if nm:
@@ -700,6 +749,7 @@ def main():
                         hist.setdefault("siteshot", hist.get("siteshot", ""))
                         hist.setdefault("geo_hint", None)
                         hist.setdefault("geo_streak", 0)
+                        hist.setdefault("latency_cn", -1)
                         merged.append(hist)
                 # 兜底：没 new 没 history 就造一个 unknown 条目，保持数据源完整性
                 if len(merged) == 0 or merged[-1].get("link") != lk:
@@ -707,6 +757,7 @@ def main():
                         "name": it.get("name", "未知"),
                         "link": lk,
                         "latency": -1,
+                        "latency_cn": -1,
                         "fail_count": 0,
                         "status": "unknown",
                         "geo_hint": None,
@@ -719,6 +770,11 @@ def main():
 
         # 【修复 siteshot 丢失 #2】最终兜底：所有仍为空 siteshot 的条目，
         # 再用历史索引尝试回填一次（防止前序查找偶发失败导致永久丢失）
+        # 【延迟展示字段】按"哪个快显示哪个"自动选取：国内源站显示 latency_cn，
+        # 国外源站自动退回 latency(美国->海外更小)，无需手动区分源站地域
+        for _e in link_status:
+            _e['latency_display'] = pick_display_latency(_e.get('latency'), _e.get('latency_cn'))
+
         _filled_count = _cross_fill_siteshot(link_status, previous_results)
         if _filled_count:
             logging.info(f"[siteshot 兜底回填] 找回 {_filled_count} 个丢失的截图 URL")
