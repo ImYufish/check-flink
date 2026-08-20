@@ -26,6 +26,8 @@ def convert(raw):
                 "link": (f.get("siteurl") or "").strip(),
                 "linkpage": (f.get("linkpage") or "").strip()
                 or (f.get("siteurl") or "").strip(),
+                # 透传人工核验标记：main.py 据此对反爬站点强制记为有反链，避免误标
+                "verified": bool(f.get("verified", False)),
             }
             for f in friends
             if f.get("enabled", True)
