@@ -366,33 +366,32 @@ def check_author_link_in_page(session, linkpage_url):
     if not AUTHOR_URL:
         return False
 
-    response, _ = request_url(session, linkpage_url, headers=RAW_HEADERS, desc="友链页面检测")
-    if not response:
-        return False
-
     # 归一化作者域名：去协议、去首尾斜杠、转小写，并兼容 www 前缀
     bare = re.sub(r'^https?://', '', AUTHOR_URL.strip()).strip('/').lower()
     domain_variants = {bare, 'www.' + bare}
     if bare.startswith('www.'):
         domain_variants.add(bare[4:])
 
-    content = response.text
+    # 先直接取静态 HTML；若请求失败（被 WAF/反爬拦截、或站点仅 JS 渲染），content 为空
+    response, _ = request_url(session, linkpage_url, headers=RAW_HEADERS, desc="友链页面检测")
+    content = response.text if response else ""
 
-    if _page_has_author_link(content, bare, domain_variants, linkpage_url):
+    if content and _page_has_author_link(content, bare, domain_variants, linkpage_url):
         return True
 
-    # 静态 HTML 未命中：可能是 JS 渲染的 SPA（如 VitePress），用无头浏览器渲染后再查
+    # 静态/直接请求未命中（含请求直接失败）：用无头浏览器渲染兜底。
+    # 真实 Chrome UA + 执行 JS，常能绕过 requests 被拦的 WAF/反爬，也能处理 JS 渲染的友链列表。
     rendered = _fetch_rendered_html(linkpage_url)
     if rendered:
-        logging.info(f"友链页面 {linkpage_url} 静态检测未命中，尝试无头渲染后复查")
+        logging.info(f"友链页面 {linkpage_url} 静态/直接请求未命中，尝试无头渲染后复查")
         if _page_has_author_link(rendered, bare, domain_variants, linkpage_url):
             return True
 
     # 未找到真实链接；若域名仅作为文本出现，单独记录但不计为反链
-    if bare in content.lower():
+    if content and bare in content.lower():
         logging.info(f"友链页面 {linkpage_url} 中仅出现作者URL文本，非真实链接，不计为反链")
     else:
-        logging.info(f"友链页面 {linkpage_url} 中未找到作者链接")
+        logging.info(f"友链页面 {linkpage_url} 中未找到作者链接（含请求失败场景）")
     return False
 
 
