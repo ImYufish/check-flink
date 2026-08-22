@@ -16,10 +16,12 @@ jobs:
   apply:
     name: 解析 / Playwright 验证 / 写入友链
     runs-on: ubuntu-latest
+    env:
+      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
     # 触发条件（不依赖 labels.*.name 表达式，改用标题前缀，避免「重验被跳过」）：
     #  - issues opened/reopened 且标题前缀 [友链申请]
     #  - issue_comment created 且评论者不是机器人、标题前缀 [友链申请]
-    #  「是否失败态(待更新)」的闸门放在解析步骤用 API 可靠读取（见下方 reverify 闸门）
+    # 「是否失败态(待更新)」的闸门放在解析步骤用 API 可靠读取
     if: >-
       (github.event_name == 'issues' &&
         startsWith(github.event.issue.title, '[友链申请]')) ||
@@ -104,11 +106,15 @@ jobs:
             if (!imgurl)  missing.push("网站头像 URL");
 
             if (missing.length > 0) {
-              await github.rest.issues.createComment({
-                owner, repo, issue_number,
-                body: "⚠️ 申请信息不完整，缺少：" + missing.join("、") + "。请补充后在本 Issue 下回复以重新验证（Issue 保持开放）。",
-              });
-              await github.rest.issues.addLabels({ owner, repo, issue_number, labels: ["待更新"] });
+              try {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number,
+                  body: "⚠️ 申请信息不完整，缺少：" + missing.join("、") + "。请补充后在本 Issue 下回复以重新验证（Issue 保持开放）。",
+                });
+                await github.rest.issues.addLabels({ owner, repo, issue_number, labels: ["待更新"] });
+              } catch(err) {
+                core.warning(`Issue ${issue_number} 不存在，跳过评论打标签: ${err.message}`);
+              }
               core.setOutput('shouldVerify', 'false');
               return;
             }
@@ -132,11 +138,15 @@ jobs:
             const exists = friends.some((f) => norm(f.siteurl) === norm(finalSiteurl));
 
             if (!isReverify && exists) {
-              await github.rest.issues.createComment({
-                owner, repo, issue_number,
-                body: "ℹ️ 友链 **" + title + "**（" + finalSiteurl + "）已存在，无需重复添加。",
-              });
-              await github.rest.issues.update({ owner, repo, issue_number, state: "closed" });
+              try {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number,
+                  body: "ℹ️ 友链 **" + title + "**（" + finalSiteurl + "）已存在，无需重复添加。",
+                });
+                await github.rest.issues.update({ owner, repo, issue_number, state: "closed" });
+              } catch(err) {
+                core.warning(`Issue ${issue_number} 不存在，跳过评论关闭issue: ${err.message}`);
+              }
               core.setOutput('shouldVerify', 'false');
               return;
             }
@@ -183,16 +193,22 @@ jobs:
               let reason = result.reason || "验证未通过";
               if (result.reachable === false) reason = "站点不可访问（" + (result.status ? "HTTP " + result.status : "无法连接") + "）";
               else if (result.hasReciprocal === false) reason = "未检测到指向本站的真实友链";
-              await github.rest.issues.createComment({
-                owner, repo, issue_number,
-                body: "⚠️ **验证未通过**：" + reason + "。\n\n请修复后在本 Issue 下回复任意内容即可重新验证（Issue 保持开放）。",
-              });
-              await github.rest.issues.addLabels({ owner, repo, issue_number, labels: ["待更新"] });
-              // 保持开放，不关闭
+              try {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number,
+                  body: "⚠️ **验证未通过**：" + reason + "。\n\n请修复后在本 Issue 下回复任意内容即可重新验证（Issue 保持开放）。",
+                });
+                await github.rest.issues.addLabels({ owner, repo, issue_number, labels: ["待更新"] });
+              } catch(err) {
+                core.warning(`Issue ${issue_number} 已不存在，跳过写评论打标签：${err.message}`);
+              }
               return;
             }
 
-            // 通过：写入 friends.json（带 issue_id）
+            // --------------------------
+            // 验证通过：写入 friends.json
+            // 【重要】写文件逻辑放在 try‑catch 之外，Issue 删除也照样写入友链
+            // --------------------------
             const defaultBranch = "main";
             const filePath = "static/friends.json";
             const fd = await github.rest.repos.getContent({ owner, repo, path: filePath, ref: defaultBranch });
@@ -224,17 +240,18 @@ jobs:
               });
             }
 
-            // 评论 + 关闭 + 移除 待更新 标签
-            const iss = await github.rest.issues.get({ owner, repo, issue_number });
-            const labels = (iss.data.labels || []).map((l) => l.name);
-            if (labels.includes("待更新")) {
-              await github.rest.issues.removeLabel({ owner, repo, issue_number, name: "待更新" }).catch(() => {});
+            // Issue 相关操作（评论、删标签、关闭）包裹捕获404
+            try {
+              const iss = await github.rest.issues.get({ owner, repo, issue_number });
+              const labels = (iss.data.labels || []).map((l) => l.name);
+              if (labels.includes("待更新")) {
+                await github.rest.issues.removeLabel({ owner, repo, issue_number, name: "待更新" });
+              }
+              await github.rest.issues.createComment({
+                owner, repo, issue_number,
+                body: "✅ 反链核验与可访问性检查均通过（引擎：" + (result.engine || "playwright") + "），已自动添加友链 **" + title + "**（" + finalSiteurl + "）。\n\nfriends.json 已更新，push 将触发 check_links 工作流重新生成检测数据。",
+              });
+              await github.rest.issues.update({ owner, repo, issue_number, state: "closed" });
+            } catch(err) {
+              core.warning(`Issue ${issue_number} 已被删除，跳过评论/关闭issue，友链已经成功写入 friends.json：${err.message}`);
             }
-            await github.rest.issues.createComment({
-              owner, repo, issue_number,
-              body: "✅ 反链核验与可访问性检查均通过（引擎：" + (result.engine || "playwright") + "），已自动添加友链 **" + title + "**（" + finalSiteurl + "）。\n\n已触发 `check_links` 重新部署，`friends.yufish.cn/friends.json` 预计几分钟内更新；博客页面加载时会直接读取最新清单（无需重新构建博客）。",
-            });
-            await github.rest.issues.update({ owner, repo, issue_number, state: "closed" });
-
-            // 写入 friends.json 即一次 push 到 main，check_links.yml 的 push:[main]
-            // 触发器会自动接管重新部署，无需在此显式 dispatch（避免重复跑、浪费 CI）。
