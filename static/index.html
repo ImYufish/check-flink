@@ -1513,8 +1513,8 @@
           ? errorLinks
               .map((link) => {
                 const host = getHost(link.link);
-                const cls = statusClass(link.latency);
-                const label = statusLabel(link.latency);
+                const cls = statusClass(link.latency_display);
+                const label = statusLabel(link.latency_display);
                 return `
                 <a class="link-row is-error" href="${escapeHtml(link.link)}" target="_blank" rel="noopener noreferrer">
                   <span class="row-name">${escapeHtml(link.name)}</span>
@@ -1532,8 +1532,8 @@
         cardGrid.innerHTML = otherLinks.length
           ? otherLinks
               .map((link, i) => {
-                const cls = statusClass(link.latency);
-                const label = statusLabel(link.latency);
+                const cls = statusClass(link.latency_display);
+                const label = statusLabel(link.latency_display);
                 const host = getHost(link.link);
                 const avatarUrl = `https://www.google.com/s2/favicons?domain=${host}&sz=64`;
 
